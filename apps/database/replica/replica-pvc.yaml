@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+
+metadata:
+  name: mysql-replica-data
+  namespace: microservices
+
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: replica
+    app.kubernetes.io/part-of: microservices-platform
+
+spec:
+  accessModes:
+    - ReadWriteOnce
+
+  storageClassName: longhorn
+
+  resources:
+    requests:
+      storage: 10Gi

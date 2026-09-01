@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: mysql-router-config
+  namespace: microservices
+
+data:
+  haproxy.cfg: |
+    global
+        log stdout format raw local0
+
+    defaults
+        log global
+        mode tcp
+        option tcplog
+
+        timeout connect 5s
+        timeout client 1m
+        timeout server 1m
+
+    frontend mysql
+        bind *:3306
+        default_backend mysql_primary
+
+    backend mysql_primary
+        option tcp-check
+
+        server primary mysql-primary-0.mysql-primary.microservices.svc.cluster.local:3306 check inter 2s fall 2 rise 2
+
+        server replica mysql-replica-0.mysql-replica.microservices.svc.cluster.local:3306 check backup
+
+    listen stats
+        bind *:8404
+        mode http
+
+        stats enable
+        stats uri /stats
+        stats refresh 10s

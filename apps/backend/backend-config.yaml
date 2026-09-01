@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: microservices
+data:
+  NODE_ENV: "production"
+  PORT: "4000"
+
+  DB_HOST: "mysql-router"
+  DB_PORT: "3306"
+  DB_NAME: "inventory"
+  DB_USER: "appuser"
+
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  CACHE_TTL: "60"

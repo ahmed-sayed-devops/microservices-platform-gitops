@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mysql-failover
+  namespace: microservices
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mysql-failover
+  namespace: microservices
+
+rules:
+
+  # Read MySQL Pods
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Execute MySQL commands inside Pods
+  - apiGroups: [""]
+    resources:
+      - pods/exec
+    verbs:
+      - create
+
+  # Manage failover state
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - create
+      - update
+      - patch
+
+  # Restart / manage HAProxy Deployment
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mysql-failover
+  namespace: microservices
+
+subjects:
+  - kind: ServiceAccount
+    name: mysql-failover
+    namespace: microservices
+
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mysql-failover

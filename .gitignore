@@ -1,0 +1,16 @@
+# Secrets / credentials
+.env
+.env.*
+*.secret.yaml
+
+# Backups
+*.backup.yaml
+*-backup.yaml
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS
+.DS_Store

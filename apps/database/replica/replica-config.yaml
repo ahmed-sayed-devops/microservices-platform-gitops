@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: mysql-replica-config
+  namespace: microservices
+
+data:
+  my.cnf: |
+    [mysqld]
+
+    server-id = 2
+
+    log_bin = mysql-bin
+
+    binlog_format = ROW
+
+    gtid_mode = ON
+
+    enforce_gtid_consistency = ON
+
+    log_replica_updates = ON
+
+    relay_log = relay-bin
+
+    read_only = ON
+
+    super_read_only = ON
+
+    skip_name_resolve = ON
+
+    bind-address = 0.0.0.0

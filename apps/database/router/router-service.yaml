@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: mysql-router
+  namespace: microservices
+
+  labels:
+    app.kubernetes.io/name: mysql-router
+    app.kubernetes.io/component: database-router
+    app.kubernetes.io/part-of: microservices-platform
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app.kubernetes.io/name: mysql-router
+    app.kubernetes.io/component: database-router
+
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+      protocol: TCP
+
+    - name: stats
+      port: 8404
+      targetPort: stats
+      protocol: TCP

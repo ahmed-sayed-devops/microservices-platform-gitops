@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-failover-controller
+  namespace: microservices
+  labels:
+    app.kubernetes.io/name: mysql-failover-controller
+    app.kubernetes.io/component: failover-controller
+    app.kubernetes.io/part-of: microservices-platform
+
+spec:
+  replicas: 1
+
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mysql-failover-controller
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql-failover-controller
+        app.kubernetes.io/component: failover-controller
+        app.kubernetes.io/part-of: microservices-platform
+
+    spec:
+      serviceAccountName: mysql-failover
+
+      containers:
+        - name: controller
+          image: a7medsayed/mysql-failover-controller:1.7
+          imagePullPolicy: Always
+
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_ROOT_PASSWORD
+
+          command:
+            - /bin/bash
+            - -c
+
+          args:
+            - |
+              set -e
+
+              echo "========================================"
+              echo "MySQL Failover Controller Starting"
+              echo "========================================"
+
+              echo "[INFO] Current state:"
+              cat /state/current-primary
+              echo "[INFO] Rejoin required:"
+              cat /state/rejoin-required
+
+              echo "[INFO] Starting auto-failover controller..."
+              /scripts/auto-failover.sh &
+
+              echo "[INFO] Starting auto-rejoin controller..."
+              /scripts/auto-rejoin.sh &
+
+              wait
+
+          volumeMounts:
+            - name: failover-state
+              mountPath: /state
+              readOnly: true
+
+      volumes:
+        - name: failover-state
+          configMap:
+            name: mysql-failover-state

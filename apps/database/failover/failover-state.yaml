@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-failover-state
+  namespace: microservices
+
+data:
+  current-primary: mysql-primary
+  rejoin-required: "false"

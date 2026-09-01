@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: mysql-router
+  namespace: microservices
+
+  labels:
+    app.kubernetes.io/name: mysql-router
+    app.kubernetes.io/component: database-router
+    app.kubernetes.io/part-of: microservices-platform
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mysql-router
+      app.kubernetes.io/component: database-router
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql-router
+        app.kubernetes.io/component: database-router
+        app.kubernetes.io/part-of: microservices-platform
+
+    spec:
+      containers:
+        - name: haproxy
+
+          image: haproxy:3.0
+
+          args:
+            - haproxy
+            - -f
+            - /config/haproxy.cfg
+
+          ports:
+            - name: mysql
+              containerPort: 3306
+
+            - name: stats
+              containerPort: 8404
+
+          volumeMounts:
+            - name: config
+              mountPath: /config
+
+          readinessProbe:
+            tcpSocket:
+              port: mysql
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+          livenessProbe:
+            tcpSocket:
+              port: mysql
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+      volumes:
+        - name: config
+          configMap:
+            name: mysql-router-config
