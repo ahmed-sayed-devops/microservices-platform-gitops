@@ -2,184 +2,163 @@
 
 Cilium is the production CNI layer used by the RKE2 Kubernetes cluster.
 
-The platform uses Cilium to provide:
+It provides the networking foundation for the platform through:
 
 - eBPF-based networking
 - Native Routing between Kubernetes nodes
 - Kubernetes Pod networking
-- Kubernetes Service load balancing through eBPF
+- eBPF-based Service networking
 - kube-proxy replacement capability
 - LoadBalancer IP Address Management (LB IPAM)
 - Layer 2 LoadBalancer IP announcements
 - Hubble-based observability support
-- Network policy enforcement
+- Kubernetes network policy support
 
-The Cilium layer sits between the RKE2 Kubernetes control plane and the application/Gateway layers.
-
-The final platform networking flow is:
-
-Client
-  |
-  v
-LoadBalancer VIP
-  |
-  v
-Cilium L2 Announcement / LB IPAM
-  |
-  v
-Cilium eBPF Datapath
-  |
-  v
-Envoy Gateway
-  |
-  v
-Gateway API HTTPRoute
-  |
-  +------------------+
-  |                  |
-  v                  v
-Frontend           Backend
-                       |
-                       +----> MySQL Router
-                       |
-                       +----> Redis
-
+Cilium is responsible for the Kubernetes networking datapath, while Envoy Gateway is responsible for the Gateway API and Layer 7 HTTP routing.
 
 ---
 
 # 1. Architecture
 
-## 1.1 High-Level Cilium Architecture
+## 1.1 Cilium Platform Architecture
 
 ```mermaid
 flowchart TB
 
     Client["External Client"]
 
-    subgraph RKE2["RKE2 Kubernetes Cluster"]
-        
-        subgraph CNI["Cilium CNI Layer"]
-            EBPF["Cilium eBPF Datapath"]
-            Native["Native Routing"]
-            KPR["eBPF Service Load Balancing"]
-            LBIPAM["Cilium LB IPAM"]
-            L2["Cilium L2 Announcements"]
-            Hubble["Hubble"]
-        end
-
-        subgraph Nodes["6 Kubernetes Nodes"]
-            CP1["rke2-cp1<br/>172.17.0.11"]
-            CP2["k8s-rke2-cp2<br/>172.17.0.12"]
-            CP3["k8s-rke2-cp3<br/>172.17.0.13"]
-
-            W1["rke2-worke01<br/>172.17.0.24"]
-            W2["rke2-worke02<br/>172.17.0.25"]
-            W3["rke2-worke03<br/>172.17.0.26"]
-        end
-
-        Gateway["Envoy Gateway"]
-        Frontend["Frontend Service"]
-        Backend["Backend Service"]
-        Redis["Redis"]
-        MySQL["MySQL / Router"]
+    subgraph Network["Private Network"]
+        Control["Control Network<br/>172.16.0.0/18<br/>eth1"]
+        PodFabric["Pod Fabric<br/>172.17.0.0/18<br/>eth2"]
+        NAT["NAT / Egress Network<br/>192.168.32.0/20<br/>eth0"]
     end
 
-    Client --> L2
+    subgraph Cilium["Cilium Networking Layer"]
+        LBIPAM["Cilium LB IPAM"]
+        L2["Cilium L2 Announcements"]
+        EBPF["Cilium eBPF Datapath"]
+        Native["Native Routing"]
+        ServiceLB["eBPF Service Load Balancing"]
+        Hubble["Hubble"]
+    end
+
+    subgraph Kubernetes["RKE2 Kubernetes"]
+        Gateway["Envoy Gateway"]
+        HTTPRoute["Gateway API HTTPRoute"]
+        Frontend["Frontend"]
+        Backend["Backend"]
+        Redis["Redis"]
+        MySQL["MySQL Router"]
+    end
+
+    Client --> Control
+    Control --> L2
     LBIPAM --> L2
     L2 --> EBPF
+
     EBPF --> Gateway
-    Gateway --> Frontend
-    Gateway --> Backend
+    Gateway --> HTTPRoute
+
+    HTTPRoute --> Frontend
+    HTTPRoute --> Backend
 
     Backend --> Redis
     Backend --> MySQL
 
     EBPF --> Native
-    EBPF --> KPR
+    Native --> PodFabric
+
+    EBPF --> ServiceLB
     EBPF --> Hubble
 
-    Native --> Nodes
+    NAT --> Cilium
 ```
 
-Cilium runs as a DaemonSet, placing one Cilium agent on every Kubernetes node.
+The overall platform separates networking responsibilities from application routing responsibilities:
 
-The actual cluster contains six Cilium agents, one on each of the three control-plane nodes and three worker nodes.
+```mermaid
+flowchart TB
 
-The current Cilium DaemonSet reports:
+    RKE2["RKE2 Kubernetes"]
+    Cilium["Cilium"]
+    Pod["Pod Networking"]
+    Service["Service Networking"]
+    Gateway["Gateway Layer"]
+    Envoy["Envoy Gateway"]
+    API["Gateway API"]
+    Apps["Applications"]
+    GitOps["GitOps / Argo CD"]
+    Rollouts["Progressive Delivery / Argo Rollouts"]
 
-- Desired: 6
-- Current: 6
-- Ready: 6
-- Available: 6
-
-The Cilium agents are also visible on all six nodes.
-
-![Cilium Agents](../../screenshots/03-Cilium-Agents.png)
-
+    RKE2 --> Cilium
+    Cilium --> Pod
+    Cilium --> Service
+    Pod --> Gateway
+    Service --> Gateway
+    Gateway --> Envoy
+    Envoy --> API
+    API --> Apps
+    Apps --> GitOps
+    GitOps --> Rollouts
+```
 
 ---
 
 # 2. Why Cilium?
 
-The cluster is designed as a private, production-like Kubernetes environment rather than a simple single-node Kubernetes lab.
+The cluster is designed as a private, production-like Kubernetes platform.
 
-Cilium was selected because it provides networking through the Linux kernel using eBPF instead of depending entirely on traditional iptables-based datapaths.
+Cilium was selected as the CNI because it provides a modern Linux-kernel-based networking datapath using eBPF.
 
-The important design goals are:
+The main design goals are:
 
 1. Efficient Pod-to-Pod networking.
 2. Native routing instead of overlay encapsulation.
-3. eBPF-based Service handling.
-4. LoadBalancer IP management for the private network.
-5. Layer 2 announcement of LoadBalancer VIPs.
-6. Network policy support.
-7. Hubble integration for future observability.
+3. eBPF-based Service networking.
+4. Private LoadBalancer IP management.
+5. Layer 2 advertisement of LoadBalancer VIPs.
+6. Kubernetes network policy support.
+7. Hubble support for networking visibility.
 8. A networking layer suitable for Gateway API and progressive delivery workloads.
 
-This keeps the network architecture close to a production private-cloud design.
-
+The cluster already contains a dedicated Pod-fabric network, so native routing can be used instead of requiring an overlay network.
 
 ---
 
-# 3. Cilium's Role in the Platform
+# 3. Cilium's Role
 
-Cilium is responsible for the Kubernetes networking layer.
+Cilium provides the Kubernetes networking foundation.
 
-It is not the application Gateway itself.
+It is not the final Gateway API implementation.
 
 The responsibilities are separated as follows:
 
 | Component | Responsibility |
 |---|---|
 | RKE2 | Kubernetes distribution and control plane |
-| Cilium | CNI, eBPF datapath, Pod networking and Service networking |
-| Cilium LB IPAM | Allocates LoadBalancer IPs |
-| Cilium L2 Announcements | Announces LoadBalancer VIPs on the private LAN |
-| Envoy Gateway | Implements Gateway API and HTTP routing |
-| Gateway API | Defines Gateway and HTTPRoute resources |
-| Kubernetes Services | Provide application service abstraction |
+| Cilium | CNI, eBPF datapath and Pod networking |
+| Cilium Service LB | Kubernetes Service load balancing |
+| Cilium LB IPAM | LoadBalancer IP allocation |
+| Cilium L2 Announcements | LoadBalancer VIP advertisement |
+| Envoy Gateway | Gateway API implementation and L7 routing |
+| Gateway API | Gateway and HTTPRoute resources |
 | Longhorn | Persistent storage |
 | Argo CD | GitOps reconciliation |
 | Argo Rollouts | Progressive delivery |
 
-This separation is intentional.
-
-Cilium provides the network datapath, while Envoy Gateway provides the L7 Gateway API implementation.
-
+This separation keeps Layer 3/4 networking independent from Layer 7 HTTP routing.
 
 ---
 
 # 4. Cilium Installation Model
 
-RKE2 was prepared without the default CNI so that Cilium could become the cluster networking layer.
-
-The RKE2 configuration contains:
+RKE2 was configured without the default CNI:
 
 ```yaml
 cni: none
 ```
 
-This prevents RKE2 from installing a competing CNI.
+This allows Cilium to become the cluster networking layer.
 
 The cluster also uses:
 
@@ -189,30 +168,33 @@ ingress-controller: none
 
 because the Gateway layer is handled separately by Envoy Gateway.
 
-The general installation flow is:
+The installation model is:
 
-```text
-RKE2 Cluster
-     |
-     | CNI disabled
-     v
-Kubernetes API
-     |
-     v
-Install Cilium
-     |
-     +----------------------+
-     |                      |
-     v                      v
-Cilium Agent            Cilium Operator
-     |
-     v
-eBPF Datapath
+```mermaid
+flowchart TB
+
+    RKE2["RKE2 Cluster"]
+
+    CNI["Default CNI Disabled<br/>cni: none"]
+
+    API["Kubernetes API"]
+
+    Cilium["Cilium Installation"]
+
+    Agent["Cilium Agents"]
+
+    EBPF["eBPF Datapath"]
+
+    RKE2 --> CNI
+    CNI --> API
+    API --> Cilium
+    Cilium --> Agent
+    Agent --> EBPF
 ```
 
-Cilium can be installed through Helm.
+Cilium can be installed and managed using Helm.
 
-A configuration matching the design used by this cluster is conceptually:
+A representative installation command for this architecture is:
 
 ```bash
 helm repo add cilium https://helm.cilium.io/
@@ -227,28 +209,22 @@ helm install cilium cilium/cilium \
   --set autoDirectNodeRoutes=true \
   --set devices=eth2 \
   --set kubeProxyReplacement=true \
-  --set l2announcements.enabled=true \
-  --set operator.replicas=2
+  --set l2announcements.enabled=true
 ```
 
-The exact historical Helm command used to bootstrap this cluster was not preserved in the captured terminal output. Therefore, the command above documents the intended configuration rather than claiming to be the exact original installation command.
-
-The resulting configuration can be verified through:
+The effective configuration can be verified with:
 
 ```bash
 kubectl -n kube-system get configmap cilium-config -o yaml
 ```
 
-Cilium stores the effective agent configuration in the `cilium-config` ConfigMap.
-
-![Cilium Configuration](../../screenshots/04-Cilium-Configuration.png)
-
+The documentation focuses on the effective configuration currently running in the cluster.
 
 ---
 
-# 5. Cilium Configuration
+# 5. Main Cilium Configuration
 
-The important configuration values in the running cluster are:
+The important configuration currently running in the cluster is:
 
 ```yaml
 ipam: kubernetes
@@ -278,53 +254,92 @@ enable-metrics: "true"
 enable-endpoint-routes: "true"
 ```
 
-These values define the main networking behavior of the cluster.
+The most important networking decisions are:
 
-The most important design decision is:
-
-```yaml
+```text
 routing-mode: native
-```
-
-combined with:
-
-```yaml
 auto-direct-node-routes: true
-```
-
-and:
-
-```yaml
 direct-routing-device: eth2
+ipv4-native-routing-cidr: 10.42.0.0/16
 ```
 
-This means that Pod traffic between nodes is routed using the Linux routing table over the dedicated Pod-fabric network.
+These settings allow Cilium to use native Linux routing over the dedicated Pod-fabric network.
 
 ![Cilium Configuration](../../screenshots/04-Cilium-Configuration.png)
 
+---
+
+# 6. Cilium Agents
+
+Cilium runs as a DaemonSet.
+
+This means a Cilium agent is deployed on each Kubernetes node.
+
+The cluster contains:
+
+```text
+3 Control-plane nodes
+3 Worker nodes
+----------------
+6 Kubernetes nodes
+```
+
+Therefore the expected Cilium state is:
+
+```text
+Desired:   6
+Current:   6
+Ready:     6
+Available: 6
+```
+
+Verification:
+
+```bash
+kubectl get pods -n kube-system \
+  -l k8s-app=cilium \
+  -o wide
+```
+
+And:
+
+```bash
+kubectl get ds cilium -n kube-system
+```
+
+The captured cluster output confirms that all six Cilium agents are Running and the DaemonSet is 6/6 ready.
+
+![Cilium Agents](../../screenshots/03-Cilium-Agents.png)
 
 ---
 
-# 6. Network Interface Selection
+# 7. Network Interface Design
 
-The Kubernetes nodes have three network roles:
+Each Kubernetes node has three network roles:
 
-```text
-                Kubernetes Node
-                      |
-          +-----------+-----------+
-          |           |           |
-          v           v           v
-        eth0        eth1        eth2
-         |           |           |
-         v           v           v
-       NAT        Control       Pod Fabric
-    192.168.x    172.16.x      172.17.x
+```mermaid
+flowchart LR
+
+    Node["Kubernetes Node"]
+
+    ETH0["eth0<br/>NAT / Egress"]
+    ETH1["eth1<br/>Control Network"]
+    ETH2["eth2<br/>Pod Fabric"]
+
+    NAT["192.168.32.0/20"]
+    CONTROL["172.16.0.0/18"]
+    POD["172.17.0.0/18"]
+
+    Node --> ETH0
+    Node --> ETH1
+    Node --> ETH2
+
+    ETH0 --> NAT
+    ETH1 --> CONTROL
+    ETH2 --> POD
 ```
 
-For the Cilium datapath, `eth2` is the important interface.
-
-On CP1:
+On CP1 the interfaces are:
 
 ```text
 eth0 -> 192.168.32.12/20
@@ -332,84 +347,74 @@ eth1 -> 172.16.0.12/18
 eth2 -> 172.17.0.11/18
 ```
 
-The Cilium configuration explicitly uses:
+Cilium is explicitly configured to use:
 
 ```yaml
 devices: eth2
 direct-routing-device: eth2
 ```
 
-Therefore:
+Therefore the traffic roles are:
 
-```text
-Control-plane traffic
-        |
-        v
-      eth1
+```mermaid
+flowchart LR
 
-Pod traffic
-        |
-        v
-      eth2
+    ETH0["eth0<br/>NAT / Egress"]
+    ETH1["eth1<br/>Control Network"]
+    ETH2["eth2<br/>Pod Fabric"]
 
-Internet / package egress
-        |
-        v
-      eth0
+    Internet["Internet / Package Egress"]
+    Control["Kubernetes Control / Admin Traffic"]
+    Pods["Native Pod Traffic"]
+
+    ETH0 --> Internet
+    ETH1 --> Control
+    ETH2 --> Pods
 ```
 
-This keeps Kubernetes control traffic and Pod traffic logically separated.
-
+This keeps normal Pod-to-Pod traffic on the dedicated Pod-fabric network.
 
 ---
 
-# 7. Native Routing
+# 8. Cilium Native Routing
 
-## 7.1 What Is Native Routing?
+## 8.1 What Is Native Routing?
 
-In native routing mode, Cilium does not encapsulate every cross-node Pod packet inside an overlay tunnel.
+In native routing mode, Cilium uses the underlying network and Linux routing table to forward Pod traffic between nodes.
 
-Instead, Cilium allows the Linux kernel to route the Pod packet using normal IP routing.
+Instead of encapsulating the Pod packet inside a VXLAN tunnel, the packet can be routed directly toward the destination node.
 
-Conceptually:
+The simplified datapath is:
 
-```text
-Pod A
- |
- | Packet
- v
-Cilium eBPF
- |
- v
-Linux Routing Table
- |
- v
-Pod CIDR Route
- |
- v
-Pod Fabric
- |
- v
-Destination Node
- |
- v
-Cilium eBPF
- |
- v
-Pod B
+```mermaid
+flowchart LR
+
+    PodA["Source Pod"]
+    EBPF1["Cilium eBPF"]
+    Route["Linux Routing Table"]
+    ETH2["eth2<br/>Pod Fabric"]
+    NodeB["Destination Node"]
+    EBPF2["Cilium eBPF"]
+    PodB["Destination Pod"]
+
+    PodA --> EBPF1
+    EBPF1 --> Route
+    Route --> ETH2
+    ETH2 --> NodeB
+    NodeB --> EBPF2
+    EBPF2 --> PodB
 ```
 
-Native routing therefore depends on the underlying network being able to route the Pod CIDRs.
-
+The important requirement is that the underlying network must be able to reach the destination Pod CIDR.
 
 ---
 
-# 8. Pod CIDR Design
+# 9. Pod CIDR Design
 
 The cluster uses:
 
 ```text
-Pod CIDR:
+Pod Network CIDR:
 10.42.0.0/16
 ```
 
@@ -425,23 +430,38 @@ rke2-worke02   -> 10.42.4.0/24
 rke2-worke03   -> 10.42.5.0/24
 ```
 
-The cluster confirms these PodCIDRs through:
+Verification:
 
 ```bash
 kubectl get nodes \
   -o custom-columns=NAME:.metadata.name,PODCIDR:.spec.podCIDR
 ```
 
-The Cilium nodes also map each Kubernetes node to its Cilium internal address.
+The Cilium node mapping can also be checked with:
 
-![Native Routing](../../screenshots/05-Cilium-Native-Routing.png)
+```bash
+kubectl get ciliumnodes -o wide
+```
 
+Current Cilium node mapping:
+
+```text
+Node               Cilium IP       Node IP
+
+rke2-cp1            10.42.0.244     172.17.0.11
+k8s-rke2-cp2        10.42.1.53      172.17.0.12
+k8s-rke2-cp3        10.42.2.248     172.17.0.13
+
+rke2-worke01        10.42.3.34      172.17.0.24
+rke2-worke02        10.42.4.198     172.17.0.25
+rke2-worke03        10.42.5.130     172.17.0.26
+```
 
 ---
 
-# 9. How Native Routing Works in This Cluster
+# 10. Native Routing Evidence
 
-On CP1, the Linux routing table contains:
+On CP1, the Linux routing table contains routes for the PodCIDRs of the other nodes:
 
 ```text
 10.42.1.0/24 via 172.17.0.12 dev eth2
@@ -451,192 +471,188 @@ On CP1, the Linux routing table contains:
 10.42.5.0/24 via 172.17.0.26 dev eth2
 ```
 
-This is the key evidence that the cluster is using direct native routing between node PodCIDRs.
-
-For example, if a Pod on CP1 wants to reach a Pod on worker03:
+The relevant network routes are:
 
 ```text
-Source Pod
-10.42.0.x
-     |
-     v
-Cilium eBPF
-     |
-     v
-Linux routing table
-     |
-     | 10.42.5.0/24
-     | via 172.17.0.26
-     v
-eth2
-172.17.0.11
-     |
-     v
-Pod Fabric
-172.17.0.0/18
-     |
-     v
-worker03
-172.17.0.26
-     |
-     v
-Cilium
-     |
-     v
-Destination Pod
-10.42.5.x
+172.16.0.0/18 dev eth1
+172.17.0.0/18 dev eth2
+192.168.32.0/20 dev eth0
 ```
 
-No VXLAN overlay header is required for this native Pod-to-Pod path.
+This provides direct routing from the node to the PodCIDRs through the Pod-fabric interface.
 
-![Native Routing](../../screenshots/05-Cilium-Native-Routing.png)
-
-
----
-
-# 10. Native Routing vs VXLAN
-
-This distinction is important because Cilium's configuration contains:
-
-```yaml
-routing-mode: native
-```
-
-and also:
-
-```yaml
-tunnel-protocol: vxlan
-```
-
-The important setting for the current datapath is:
-
-```yaml
-routing-mode: native
-```
-
-The VXLAN protocol setting does not mean that the current Pod datapath is using VXLAN encapsulation.
-
-The routing mode determines whether Cilium uses native routing or tunneling.
-
----
-
-## 10.1 Native Routing
+For example, traffic from CP1 to a Pod on worker03 follows:
 
 ```mermaid
 flowchart LR
 
-    PodA["Pod A<br/>10.42.0.x"]
-    CiliumA["Cilium eBPF"]
-    Route["Linux Routing Table"]
-    Eth["eth2<br/>Pod Fabric"]
-    NodeB["Destination Node<br/>172.17.0.x"]
-    CiliumB["Cilium eBPF"]
-    PodB["Pod B<br/>10.42.5.x"]
+    PodA["Pod on CP1<br/>10.42.0.x"]
 
-    PodA --> CiliumA
-    CiliumA --> Route
-    Route --> Eth
-    Eth --> NodeB
-    NodeB --> CiliumB
-    CiliumB --> PodB
+    EBPF["Cilium eBPF"]
+
+    Route["Linux Route<br/>10.42.5.0/24"]
+
+    ETH2["eth2<br/>172.17.0.11"]
+
+    Fabric["Pod Fabric<br/>172.17.0.0/18"]
+
+    Worker["worker03<br/>172.17.0.26"]
+
+    PodB["Pod on worker03<br/>10.42.5.x"]
+
+    PodA --> EBPF
+    EBPF --> Route
+    Route --> ETH2
+    ETH2 --> Fabric
+    Fabric --> Worker
+    Worker --> PodB
 ```
 
-Packet:
-
-```text
-Original IP packet
-        |
-        v
-Cilium eBPF
-        |
-        v
-Linux routing
-        |
-        v
-Pod Fabric
-        |
-        v
-Destination node
-```
-
-There is no overlay encapsulation added for the cross-node Pod packet.
-
-Advantages:
-
-- Lower encapsulation overhead.
-- Simpler packet path.
-- Better performance potential.
-- Uses the existing node network.
-- Easier packet inspection.
-- No VXLAN tunnel header.
-
-Trade-off:
-
-The underlying network must be able to route the Pod CIDRs.
+![Native Routing](../../screenshots/05-Cilium-Native-Routing.png)
 
 ---
 
-## 10.2 VXLAN
+# 11. Native Routing vs VXLAN
 
-With VXLAN tunneling mode, the packet would conceptually look like:
+Cilium supports different datapath models.
+
+The two relevant models for this design are:
+
+```text
+Native Routing
+VXLAN Overlay
+```
+
+---
+
+## 11.1 Native Routing
 
 ```mermaid
 flowchart LR
 
     PodA["Pod A"]
-    CiliumA["Cilium eBPF"]
-    VXLAN["VXLAN Encapsulation"]
-    Network["Node Network"]
-    Decap["VXLAN Decapsulation"]
-    CiliumB["Cilium"]
+
+    EBPF["Cilium eBPF"]
+
+    Routing["Linux Routing"]
+
+    Fabric["Pod Fabric"]
+
+    NodeB["Destination Node"]
+
     PodB["Pod B"]
 
-    PodA --> CiliumA
-    CiliumA --> VXLAN
-    VXLAN --> Network
-    Network --> Decap
-    Decap --> CiliumB
-    CiliumB --> PodB
+    PodA --> EBPF
+    EBPF --> Routing
+    Routing --> Fabric
+    Fabric --> NodeB
+    NodeB --> PodB
 ```
 
-Conceptually:
+The packet remains an IP packet and is routed through the underlying network.
 
-```text
-Original Pod packet
-        |
-        v
-VXLAN encapsulation
-        |
-        v
-Outer node-to-node packet
-        |
-        v
-Destination node
-        |
-        v
-VXLAN decapsulation
-        |
-        v
-Original Pod packet
+The packet path is:
+
+```mermaid
+flowchart TB
+
+    Packet["Original Pod Packet"]
+
+    EBPF["Cilium eBPF"]
+
+    Routing["Linux Routing"]
+
+    Fabric["Pod Fabric"]
+
+    Destination["Destination Node"]
+
+    Packet --> EBPF
+    EBPF --> Routing
+    Routing --> Fabric
+    Fabric --> Destination
 ```
 
 Advantages:
 
-- Underlying network does not need to know Pod CIDRs.
-- Easier deployment across networks that cannot route Pod CIDRs.
+- No overlay encapsulation.
+- Lower packet overhead.
+- Simpler datapath.
+- Better visibility into the actual network path.
+- Uses the dedicated Pod network directly.
+
+Trade-off:
+
+The underlying network must provide reachability to the Pod CIDRs.
+
+---
+
+## 11.2 VXLAN Overlay
+
+```mermaid
+flowchart LR
+
+    PodA["Pod A"]
+
+    EBPF["Cilium eBPF"]
+
+    Encapsulation["VXLAN Encapsulation"]
+
+    Network["Underlying Network"]
+
+    NodeB["Destination Node"]
+
+    Decapsulation["VXLAN Decapsulation"]
+
+    PodB["Pod B"]
+
+    PodA --> EBPF
+    EBPF --> Encapsulation
+    Encapsulation --> Network
+    Network --> NodeB
+    NodeB --> Decapsulation
+    Decapsulation --> PodB
+```
+
+The packet path becomes:
+
+```mermaid
+flowchart TB
+
+    Packet["Original Pod Packet"]
+
+    Encapsulation["VXLAN Encapsulation"]
+
+    Outer["Outer Node-to-Node Packet"]
+
+    Destination["Destination Node"]
+
+    Decapsulation["VXLAN Decapsulation"]
+
+    Original["Original Pod Packet"]
+
+    Packet --> Encapsulation
+    Encapsulation --> Outer
+    Outer --> Destination
+    Destination --> Decapsulation
+    Decapsulation --> Original
+```
+
+Advantages:
+
+- Underlying network does not need direct Pod CIDR routing.
 - Provides an overlay abstraction.
+- Useful when the underlying network cannot route Pod networks.
 
 Trade-offs:
 
 - Additional encapsulation overhead.
-- More processing.
-- Additional MTU considerations.
+- More MTU considerations.
 - More complex packet path.
-
+- Additional processing.
 
 ---
 
-# 11. Why Native Routing Was Selected
+# 12. Why Native Routing Was Selected
 
 The cluster already has a dedicated Pod-fabric network:
 
@@ -644,30 +660,54 @@ The cluster already has a dedicated Pod-fabric network:
 172.17.0.0/18
 ```
 
-All nodes have connectivity through this network.
+Cilium is configured to use:
 
-The Pod CIDRs are also explicitly routed between nodes.
-
-Therefore, an overlay tunnel was unnecessary for this topology.
-
-The selected design is:
-
-```text
-Dedicated Pod Fabric
-        +
-Pod CIDR routing
-        +
-Cilium native routing
-        =
-Direct Pod networking
+```yaml
+routing-mode: native
 ```
 
-This keeps the datapath simple and avoids unnecessary encapsulation.
+and:
 
+```yaml
+auto-direct-node-routes: "true"
+```
+
+with:
+
+```yaml
+direct-routing-device: eth2
+```
+
+The nodes also have direct routes to the PodCIDRs.
+
+Therefore the architecture does not require an overlay tunnel.
+
+The design is:
+
+```mermaid
+flowchart TB
+
+    PodTraffic["Pod-to-Pod Traffic"]
+
+    Cilium["Cilium Native Routing"]
+
+    Routes["Direct Node Routes"]
+
+    ETH2["eth2<br/>Pod Fabric"]
+
+    Destination["Destination Pod CIDR"]
+
+    PodTraffic --> Cilium
+    Cilium --> Routes
+    Routes --> ETH2
+    ETH2 --> Destination
+```
+
+This keeps the Pod datapath simple and avoids unnecessary VXLAN encapsulation.
 
 ---
 
-# 12. MTU Considerations
+# 13. MTU Design
 
 The internal Kubernetes networks use an MTU target of:
 
@@ -675,160 +715,94 @@ The internal Kubernetes networks use an MTU target of:
 1400
 ```
 
-The important interfaces are:
+The relevant interfaces are:
 
 ```text
-Control Network -> eth1 -> MTU 1400
-Pod Fabric      -> eth2 -> MTU 1400
+eth1 -> Control Network -> MTU 1400
+eth2 -> Pod Fabric      -> MTU 1400
 ```
 
-The NAT interface remains separate from the internal cluster networks.
+The NAT interface remains separate.
 
-The reason MTU matters is that encapsulation can consume additional bytes from the packet.
+MTU becomes especially important when using overlay encapsulation.
 
-For example:
+A native packet is conceptually:
 
 ```text
-Native Routing:
-
-[ IP ][ TCP ][ Application Data ]
-
-
-VXLAN:
-
-[ Outer IP ][ UDP ][ VXLAN ][ Inner IP ][ TCP ][ Application Data ]
++------------------------------+
+| IP | TCP | Application Data  |
++------------------------------+
 ```
 
-Because the current Pod datapath is native routing, the cluster avoids VXLAN encapsulation overhead for normal cross-node Pod traffic.
+A VXLAN packet adds an outer encapsulation:
 
+```text
++------------------------------------------------------+
+| Outer IP | UDP | VXLAN | Inner IP | TCP | Data       |
++------------------------------------------------------+
+```
+
+Because the selected Pod datapath is native routing, normal cross-node Pod traffic does not require VXLAN encapsulation.
 
 ---
 
-# 13. kube-proxy Replacement
+# 14. kube-proxy Replacement
 
-Cilium can implement Kubernetes Service handling using eBPF.
+Cilium provides Kubernetes Service networking through its eBPF datapath.
 
-Traditional Kubernetes networking normally uses:
+With Cilium's kube-proxy replacement capability enabled, Service traffic can be processed through eBPF.
 
-```text
-Client
-  |
-  v
-Service
-  |
-  v
-kube-proxy
-  |
-  v
-iptables / IPVS
-  |
-  v
-Backend Pod
+The architecture is:
+
+```mermaid
+flowchart LR
+
+    Client["Client / Pod"]
+
+    Service["Kubernetes Service"]
+
+    CiliumLB["Cilium eBPF Service LB"]
+
+    Backend["Backend Pod"]
+
+    Client --> Service
+    Service --> CiliumLB
+    CiliumLB --> Backend
 ```
 
-With Cilium's kube-proxy replacement model:
-
-```text
-Client
-  |
-  v
-Service
-  |
-  v
-Cilium eBPF Service LB
-  |
-  v
-Backend Pod
-```
-
-The eBPF datapath can perform:
+Cilium's eBPF Service datapath provides functionality such as:
 
 - Service lookup
 - Backend selection
+- Service forwarding
 - NAT
 - NodePort handling
 - LoadBalancer handling
-- Service traffic forwarding
 
-This moves Service processing into the kernel datapath.
-
----
-
-# 14. kube-proxy Replacement in the Current Cluster
-
-The running Cilium configuration contains:
+The Cilium configuration enables this capability through:
 
 ```yaml
 kube-proxy-replacement: "true"
 ```
 
-This confirms that Cilium's kube-proxy replacement capability is enabled.
+Verification:
 
-However, the current RKE2 cluster still has kube-proxy Pods running.
+```bash
+kubectl -n kube-system get configmap cilium-config -o yaml \
+  | grep -i kube-proxy
+```
 
-Therefore the current cluster should NOT be documented as completely kube-proxy-free.
-
-The accurate state is:
+Expected:
 
 ```text
-Cilium:
-kube-proxy-replacement = true
-
-AND
-
-RKE2:
-kube-proxy DaemonSet = still present
+kube-proxy-replacement: "true"
 ```
-
-This distinction is important when describing the current architecture.
 
 ---
 
-# 15. kube-proxy Architecture Comparison
+# 15. Service Packet Flow
 
-## Traditional Kubernetes
-
-```mermaid
-flowchart LR
-
-    Client["Client / Pod"]
-    Service["Kubernetes Service"]
-    KP["kube-proxy"]
-    IPT["iptables / IPVS"]
-    Backend["Backend Pod"]
-
-    Client --> Service
-    Service --> KP
-    KP --> IPT
-    IPT --> Backend
-```
-
-The Service traffic is programmed through traditional kernel networking mechanisms.
-
----
-
-## Cilium eBPF Service Datapath
-
-```mermaid
-flowchart LR
-
-    Client["Client / Pod"]
-    Service["Kubernetes Service"]
-    EBPF["Cilium eBPF Service LB"]
-    Backend["Backend Pod"]
-
-    Client --> Service
-    Service --> EBPF
-    EBPF --> Backend
-```
-
-The Service lookup and backend selection are implemented through Cilium's eBPF datapath.
-
----
-
-# 16. What Happens to a Service Packet?
-
-Consider:
+Consider the frontend Service:
 
 ```text
 frontend
@@ -836,84 +810,78 @@ ClusterIP:
 10.43.48.136:80
 ```
 
-A Pod sends:
+A Pod sends traffic to:
 
 ```text
-Destination:
 10.43.48.136:80
 ```
 
-The conceptual path is:
+The conceptual datapath is:
 
-```text
-Application
-     |
-     v
-ClusterIP
-10.43.48.136:80
-     |
-     v
-Cilium eBPF
-     |
-     v
-Service LB lookup
-     |
-     v
-Selected frontend Pod
-     |
-     v
-10.42.x.x:80
+```mermaid
+flowchart LR
+
+    App["Application"]
+
+    ClusterIP["Frontend ClusterIP<br/>10.43.48.136:80"]
+
+    EBPF["Cilium eBPF Service LB"]
+
+    Backend["Selected Frontend Pod"]
+
+    App --> ClusterIP
+    ClusterIP --> EBPF
+    EBPF --> Backend
 ```
 
-Instead of depending exclusively on a userspace proxy, Cilium programs the kernel datapath to perform the Service translation.
+Cilium performs the Service lookup and selects an available backend through the eBPF datapath.
 
+This provides an efficient kernel-level path for Kubernetes Service traffic.
 
 ---
 
-# 17. kube-proxy Status and Migration Consideration
+# 16. LoadBalancer Service Flow
 
-The current cluster has both:
+For a LoadBalancer Service, Cilium extends the same networking model:
 
-```text
-Cilium kube-proxy replacement enabled
+```mermaid
+flowchart TB
+
+    Client["External Client"]
+
+    VIP["LoadBalancer VIP<br/>172.16.3.102"]
+
+    L2["Cilium L2 Announcement"]
+
+    EBPF["Cilium eBPF Service LB"]
+
+    Envoy["Envoy Gateway"]
+
+    Client --> VIP
+    VIP --> L2
+    L2 --> EBPF
+    EBPF --> Envoy
 ```
 
-and:
+This demonstrates how the Cilium networking layer connects the private LoadBalancer VIP to the Gateway workload.
+
+The responsibilities remain separated:
 
 ```text
-RKE2 kube-proxy Pods still running
+Cilium:
+L2 + LoadBalancer + eBPF datapath
+
+Envoy Gateway:
+Gateway API + HTTP routing
 ```
-
-Therefore, a future move to a completely kube-proxy-free cluster should be treated as a separate migration task.
-
-A safe migration should include:
-
-```text
-Verify Cilium KPR
-        |
-        v
-Validate Service traffic
-        |
-        v
-Migrate node by node
-        |
-        v
-Validate Service traffic
-        |
-        v
-Remove kube-proxy
-```
-
-The current Cilium implementation does not claim that this migration has already been completed.
-
 
 ---
 
-# 18. Cilium LoadBalancer IPAM
+# 17. Cilium LoadBalancer IPAM
 
-The private Kubernetes environment does not have a cloud-provider LoadBalancer.
+The private Kubernetes cluster does not rely on a cloud-provider LoadBalancer.
 
-Therefore, Cilium LB IPAM is used to allocate LoadBalancer IP addresses.
+Cilium LB IPAM is therefore used to allocate LoadBalancer IP addresses.
 
 The configured pool is:
 
@@ -921,15 +889,27 @@ The configured pool is:
 172.16.3.100 - 172.16.3.150
 ```
 
-This gives:
+The pool contains:
 
 ```text
-Total IPs: 51
-Used:       3
-Available: 48
+Total:     51 IPs
+Used:       3 IPs
+Available: 48 IPs
 ```
 
-The current pool is:
+Verification:
+
+```bash
+kubectl get ciliumloadbalancerippools
+```
+
+Detailed configuration:
+
+```bash
+kubectl get ciliumloadbalancerippools -o yaml
+```
+
+Current pool:
 
 ```yaml
 apiVersion: cilium.io/v2
@@ -942,20 +922,17 @@ spec:
       stop: 172.16.3.150
 ```
 
-The pool is not disabled and has no conflict.
+LB IPAM is responsible for IP allocation.
 
-Cilium LB IPAM is responsible for allocation.
+It does not by itself make the IP reachable on the network.
 
-It does not by itself advertise the IP on the network.
-
-That responsibility is handled by L2 Announcements.
+That is handled by the L2 Announcement layer.
 
 ![Cilium LB IPAM and L2](../../screenshots/06-Cilium-LB-IPAM-L2.png)
 
-
 ---
 
-# 19. Cilium L2 Announcements
+# 18. Cilium L2 Announcements
 
 The cluster uses:
 
@@ -970,74 +947,115 @@ spec:
   loadBalancerIPs: true
 ```
 
-This means LoadBalancer IPs are announced on:
+Verification:
+
+```bash
+kubectl get ciliuml2announcementpolicies
+```
+
+Detailed:
+
+```bash
+kubectl get ciliuml2announcementpolicies -o yaml
+```
+
+The policy uses:
 
 ```text
 eth1
 ```
 
-which belongs to the private Control Network:
+which belongs to:
 
 ```text
 172.16.0.0/18
 ```
 
-The important idea is:
-
-```text
-LB IPAM
-   |
-   | Allocates VIP
-   v
-172.16.3.102
-   |
-   v
-L2 Announcement
-   |
-   | ARP
-   v
-Private Network
-```
-
-Cilium L2 Announcements make the LoadBalancer VIP reachable on the local Layer-2 network.
-
----
-
-# 20. LB IPAM + L2 Announcement Architecture
+The relationship is:
 
 ```mermaid
 flowchart TB
 
-    Pool["CiliumLoadBalancerIPPool<br/>172.16.3.100 - 172.16.3.150"]
+    Pool["Cilium LB IP Pool<br/>172.16.3.100 - 172.16.3.150"]
 
-    Service["Kubernetes Service<br/>type: LoadBalancer"]
+    Service["LoadBalancer Service"]
 
     VIP["Allocated VIP<br/>172.16.3.102"]
 
     L2["Cilium L2 Announcement"]
 
-    ETH["eth1<br/>Control Network"]
+    ETH1["eth1<br/>172.16.0.0/18"]
 
-    Client["Client"]
-
-    Envoy["Envoy Gateway"]
+    Network["Private Control Network"]
 
     Pool --> Service
     Service --> VIP
     VIP --> L2
-    L2 --> ETH
-    Client --> ETH
-    ETH --> Envoy
+    L2 --> ETH1
+    ETH1 --> Network
 ```
 
-This provides a private-cloud style LoadBalancer mechanism without requiring a cloud LoadBalancer provider.
-
+This allows the private network to learn how to reach the LoadBalancer VIP.
 
 ---
 
-# 21. Gateway VIP Example
+# 19. LB IPAM vs L2 Announcement
 
-The Envoy Gateway Service currently has:
+These two Cilium features have different responsibilities:
+
+```mermaid
+flowchart LR
+
+    IPAM["LB IPAM<br/>IP Allocation"]
+
+    VIP["LoadBalancer VIP"]
+
+    L2["L2 Announcement<br/>VIP Advertisement"]
+
+    Network["Private Network"]
+
+    IPAM --> VIP
+    VIP --> L2
+    L2 --> Network
+```
+
+LB IPAM answers:
+
+```text
+Which IP should the LoadBalancer Service receive?
+```
+
+Example:
+
+```text
+172.16.3.102
+```
+
+L2 Announcement answers:
+
+```text
+How should that VIP be advertised on the local network?
+```
+
+Therefore:
+
+```text
+LB IPAM
+=
+IP allocation
+
+L2 Announcement
+=
+Network advertisement
+```
+
+Both features work together to provide the private LoadBalancer architecture.
+
+---
+
+# 20. Gateway VIP Example
+
+The Envoy Gateway Service currently uses:
 
 ```text
 Type:
@@ -1053,56 +1071,55 @@ Port:
 80
 ```
 
-Therefore the complete path is:
+The traffic architecture is:
 
-```text
-Client
-   |
-   | HTTP
-   v
-172.16.3.102:80
-   |
-   | L2 / ARP
-   v
-Node announcing VIP
-   |
-   v
-Cilium eBPF Service LB
-   |
-   v
-Envoy Gateway Pod
-   |
-   v
-Gateway API
-   |
-   v
-HTTPRoute
-   |
-   +----> Frontend
-   |
-   +----> Backend
+```mermaid
+flowchart LR
+
+    Client["Client"]
+
+    VIP["172.16.3.102:80"]
+
+    L2["Cilium L2 Announcement"]
+
+    Cilium["Cilium eBPF"]
+
+    Envoy["Envoy Gateway"]
+
+    Route["Gateway API HTTPRoute"]
+
+    Frontend["Frontend"]
+
+    Backend["Backend"]
+
+    Client --> VIP
+    VIP --> L2
+    L2 --> Cilium
+    Cilium --> Envoy
+    Envoy --> Route
+    Route --> Frontend
+    Route --> Backend
 ```
 
-The separation is:
+This clearly separates:
 
 ```text
 Cilium:
-Network datapath + VIP reachability
+Network datapath + LoadBalancer reachability
 
 Envoy Gateway:
-L7 Gateway API + HTTP routing
+Gateway API + Layer 7 HTTP routing
 ```
 
-Cilium is not acting as the final Gateway API controller in this design.
-
+Cilium is therefore the networking foundation, while Envoy Gateway provides the application-facing Gateway API layer.
 
 ---
 
-# 22. Cilium Service Connectivity Test
+# 21. Pod-to-Service Connectivity
 
-The networking layer was validated from an actual Pod inside the cluster.
+The Cilium networking layer was validated from an actual Pod inside the cluster.
 
-A temporary test client was created:
+A temporary test Pod was created:
 
 ```bash
 kubectl run cilium-test-client \
@@ -1122,17 +1139,13 @@ Node:
 rke2-worke03
 ```
 
-This confirms that Cilium assigned Pod networking correctly.
-
-The test then accessed the internal frontend Service:
+The Pod successfully accessed the frontend Service:
 
 ```bash
 curl http://frontend
 ```
 
-The frontend returned its HTTP response successfully.
-
-The same Pod accessed the backend Service:
+It also successfully accessed the backend Service:
 
 ```bash
 curl http://backend:4000/api/health
@@ -1147,153 +1160,109 @@ The backend returned:
 }
 ```
 
-This validates:
-
-```text
-Pod
- |
- v
-Cilium networking
- |
- v
-Kubernetes Service
- |
- v
-Backend Pod
- |
- v
-Database connectivity
-```
+This validates the internal Service networking path.
 
 ![Cilium Service Connectivity](../../screenshots/07-Cilium-Service-Connectivity.png)
 
-
 ---
 
-# 23. Pod-to-Service Traffic Flow
+# 22. Pod-to-Service Traffic Flow
+
+The tested traffic can be represented as:
 
 ```mermaid
 sequenceDiagram
 
-    participant Client as Test Pod
+    participant Pod as Test Pod
     participant Cilium as Cilium eBPF
     participant Service as Backend Service
     participant Backend as Backend Pod
     participant DB as MySQL
 
-    Client->>Cilium: TCP backend:4000
+    Pod->>Cilium: Request backend:4000
     Cilium->>Service: Service lookup
     Service->>Cilium: Select backend
     Cilium->>Backend: Forward traffic
     Backend->>DB: Database request
     DB-->>Backend: Database response
     Backend-->>Cilium: HTTP 200
-    Cilium-->>Client: HTTP 200
+    Cilium-->>Pod: HTTP 200
 ```
 
-The actual test result was:
+This validates:
 
 ```text
-GET /api/health
-
-status = UP
-database = UP
+Pod
+  |
+  v
+Cilium networking
+  |
+  v
+Kubernetes Service
+  |
+  v
+Backend
+  |
+  v
+Database
 ```
 
 ---
 
-# 24. Cilium Node Mapping
+# 23. Pod-to-Pod Traffic Flow
 
-Cilium maintains a CiliumNode representation for every Kubernetes node.
-
-Current mapping:
-
-```text
-Node               Cilium IP       Pod Network IP
-
-rke2-cp1            10.42.0.244     172.17.0.11
-k8s-rke2-cp2        10.42.1.53      172.17.0.12
-k8s-rke2-cp3        10.42.2.248     172.17.0.13
-
-rke2-worke01        10.42.3.34      172.17.0.24
-rke2-worke02        10.42.4.198     172.17.0.25
-rke2-worke03        10.42.5.130     172.17.0.26
-```
-
-The Cilium internal addresses are associated with the corresponding node Pod CIDR.
-
-This provides the node-level information required by the Cilium datapath.
-
-
----
-
-# 25. Cilium Datapath Summary
-
-```mermaid
-flowchart TB
-
-    PodA["Pod A<br/>10.42.x.x"]
-
-    EBPF1["Cilium eBPF"]
-
-    ServiceLB["eBPF Service LB"]
-
-    Route["Native Linux Routing"]
-
-    Fabric["Pod Fabric<br/>172.17.0.0/18"]
-
-    Node["Destination Node"]
-
-    EBPF2["Cilium eBPF"]
-
-    PodB["Pod B"]
-
-    PodA --> EBPF1
-
-    EBPF1 --> ServiceLB
-
-    ServiceLB --> Route
-
-    Route --> Fabric
-
-    Fabric --> Node
-
-    Node --> EBPF2
-
-    EBPF2 --> PodB
-```
-
-The major design principle is:
-
-```text
-eBPF
- +
-Native Routing
- +
-Dedicated Pod Fabric
-```
-
-
----
-
-# 26. External Traffic Flow
-
-For external traffic entering through the Gateway:
+For cross-node Pod communication, the datapath is:
 
 ```mermaid
 flowchart LR
 
+    Source["Source Pod"]
+
+    CiliumA["Cilium eBPF"]
+
+    Routing["Native Linux Routing"]
+
+    Eth2["eth2"]
+
+    Fabric["172.17.0.0/18<br/>Pod Fabric"]
+
+    Node["Destination Node"]
+
+    CiliumB["Cilium eBPF"]
+
+    Destination["Destination Pod"]
+
+    Source --> CiliumA
+    CiliumA --> Routing
+    Routing --> Eth2
+    Eth2 --> Fabric
+    Fabric --> Node
+    Node --> CiliumB
+    CiliumB --> Destination
+```
+
+The important point is that cross-node Pod traffic uses the dedicated Pod-fabric network.
+
+---
+
+# 24. External Traffic Flow
+
+The external request path through the Gateway layer is:
+
+```mermaid
+flowchart TB
+
     Client["External Client"]
 
-    VIP["172.16.3.102:80"]
+    VIP["LoadBalancer VIP<br/>172.16.3.102"]
 
     L2["Cilium L2 Announcement"]
 
-    LB["Cilium eBPF LoadBalancer"]
+    ServiceLB["Cilium Service Load Balancer"]
 
     Envoy["Envoy Gateway"]
 
-    Route["HTTPRoute"]
+    HTTPRoute["Gateway API HTTPRoute"]
 
     Frontend["Frontend Service"]
 
@@ -1301,155 +1270,59 @@ flowchart LR
 
     Client --> VIP
     VIP --> L2
-    L2 --> LB
-    LB --> Envoy
-    Envoy --> Route
+    L2 --> ServiceLB
+    ServiceLB --> Envoy
+    Envoy --> HTTPRoute
 
-    Route --> Frontend
-    Route --> Backend
+    HTTPRoute --> Frontend
+    HTTPRoute --> Backend
 ```
 
-The important separation is:
-
-```text
-Cilium:
-Network datapath + VIP reachability
-
-Envoy Gateway:
-L7 Gateway API + HTTP routing
-```
-
+This is the main external traffic path used by the platform.
 
 ---
 
-# 27. Internal Traffic Flow
+# 25. Network Separation
 
-For Pod-to-Pod traffic:
+The complete network separation is:
 
 ```mermaid
-flowchart LR
+flowchart TB
 
-    PodA["Source Pod"]
+    Node["Kubernetes Node"]
 
-    EBPF1["Cilium eBPF"]
+    NAT["eth0<br/>192.168.32.0/20<br/>NAT / Egress"]
 
-    Route["Linux Routing"]
+    Control["eth1<br/>172.16.0.0/18<br/>Control Network"]
 
-    Eth2["eth2<br/>172.17.0.0/18"]
+    PodFabric["eth2<br/>172.17.0.0/18<br/>Pod Fabric"]
 
-    NodeB["Destination Node"]
+    Internet["Internet"]
 
-    EBPF2["Cilium eBPF"]
+    API["Kubernetes / Admin Traffic"]
 
-    PodB["Destination Pod"]
+    Pods["Pod Traffic"]
 
-    PodA --> EBPF1
-    EBPF1 --> Route
-    Route --> Eth2
-    Eth2 --> NodeB
-    NodeB --> EBPF2
-    EBPF2 --> PodB
+    Node --> NAT
+    Node --> Control
+    Node --> PodFabric
+
+    NAT --> Internet
+    Control --> API
+    PodFabric --> Pods
 ```
 
-No overlay tunnel is required for this native routing path.
+The three networks have different responsibilities:
 
+| Network | Interface | Purpose |
+|---|---|---|
+| NAT | eth0 | Internet/package/image egress |
+| Control | eth1 | Kubernetes control/admin traffic and LoadBalancer VIP advertisement |
+| Pod Fabric | eth2 | Native Pod and node-to-node Pod traffic |
 
 ---
 
-# 28. Network Separation
-
-The node networking model is:
-
-```text
-                         Kubernetes Node
-                               |
-             +-----------------+-----------------+
-             |                 |                 |
-             v                 v                 v
-          eth0              eth1              eth2
-             |                 |                 |
-             v                 v                 v
-          NAT/Egress       Control Network    Pod Fabric
-        192.168.32.0/20   172.16.0.0/18     172.17.0.0/18
-             |                 |                 |
-             v                 v                 v
-        Internet         Kubernetes/Admin     Pod traffic
-```
-
-This separation reduces contention and makes the network responsibilities easier to reason about.
-
-
----
-
-# 29. Why Use eth2 for Cilium?
-
-The cluster intentionally separates Pod traffic from Kubernetes control traffic.
-
-Cilium therefore uses:
-
-```yaml
-devices: eth2
-direct-routing-device: eth2
-```
-
-The Pod-fabric interface is:
-
-```text
-eth2
-172.17.0.x/18
-```
-
-This means native Pod traffic is sent over the dedicated Pod network instead of the NAT network.
-
-The design prevents normal Pod-to-Pod traffic from depending on Internet/NAT connectivity.
-
-
----
-
-# 30. Why Use eth1 for L2 Announcements?
-
-The LoadBalancer VIP range is:
-
-```text
-172.16.3.100 - 172.16.3.150
-```
-
-This belongs to the Control Network:
-
-```text
-172.16.0.0/18
-```
-
-Therefore the L2 announcement policy explicitly uses:
-
-```yaml
-interfaces:
-  - eth1
-```
-
-The architecture becomes:
-
-```text
-LoadBalancer VIP
-172.16.3.102
-       |
-       v
-Cilium L2 Announcement
-       |
-       v
-eth1
-       |
-       v
-Control Network
-172.16.0.0/18
-```
-
-This keeps the external/private service VIP mechanism on the intended internal network.
-
-
----
-
-# 31. Hubble
+# 26. Hubble
 
 Hubble is enabled in the current Cilium configuration:
 
@@ -1457,33 +1330,32 @@ Hubble is enabled in the current Cilium configuration:
 enable-hubble: "true"
 ```
 
-Cilium also exposes the Hubble peer service:
+The cluster also contains the Hubble peer Service:
 
 ```text
 hubble-peer
 ```
 
-Hubble is intended to provide visibility into:
+Hubble can provide visibility into:
 
 - Pod-to-Pod flows
 - Service traffic
 - Network policy decisions
-- DNS flows
-- Drop events
-- HTTP/L7 visibility when applicable
+- DNS traffic
+- Dropped packets
+- HTTP/L7 flows when applicable
 
-The current Cilium configuration also enables metrics and policy correlation.
+The Cilium configuration also enables metrics and policy correlation.
 
-Hubble is therefore part of the networking foundation and can be expanded later as part of the platform's Observability phase.
-
+Hubble is therefore part of the networking foundation and can be expanded during the platform's Observability phase.
 
 ---
 
-# 32. Repository Structure
+# 27. Repository Structure
 
 The GitOps repository separates infrastructure from applications.
 
-The Cilium-related infrastructure is organized under:
+The Cilium manifests are located under:
 
 ```text
 k8s/
@@ -1500,26 +1372,27 @@ k8s/
         └── helmchart.yaml
 ```
 
-Cilium infrastructure manifests:
-
-```text
-k8s/infrastructure/cilium/
-```
-
-Application manifests remain under:
+Application resources remain under:
 
 ```text
 k8s/apps/
 ```
 
-This separation allows the networking foundation to remain independent from application workloads.
-
+This separation keeps the networking foundation independent from application workloads.
 
 ---
 
-# 33. Cilium L2 Announcement Manifest
+# 28. Cilium Manifests
 
-The repository contains:
+## 28.1 L2 Announcement Policy
+
+File:
+
+```text
+k8s/infrastructure/cilium/l2-announcement-policy.yaml
+```
+
+Content:
 
 ```yaml
 apiVersion: cilium.io/v2alpha1
@@ -1532,14 +1405,19 @@ spec:
   loadBalancerIPs: true
 ```
 
-This policy tells Cilium to announce LoadBalancer IPs on `eth1`.
-
+The policy enables LoadBalancer IP advertisement through `eth1`.
 
 ---
 
-# 34. Cilium LoadBalancer IP Pool Manifest
+## 28.2 LoadBalancer IP Pool
 
-The repository contains:
+File:
+
+```text
+k8s/infrastructure/cilium/loadbalancer-ip-pool.yaml
+```
+
+Content:
 
 ```yaml
 apiVersion: cilium.io/v2
@@ -1552,22 +1430,13 @@ spec:
       stop: 172.16.3.150
 ```
 
-This creates a controlled address pool for LoadBalancer Services.
-
-The current pool contains:
-
-```text
-51 total IPs
-48 available
-3 used
-```
-
+The pool provides a controlled private address range for LoadBalancer Services.
 
 ---
 
-# 35. Verification Commands
+# 29. Verification
 
-## Cilium Agents
+## 29.1 Cilium Agents
 
 ```bash
 kubectl get pods -n kube-system \
@@ -1584,7 +1453,7 @@ Expected:
 
 ---
 
-## DaemonSet
+## 29.2 Cilium DaemonSet
 
 ```bash
 kubectl get ds cilium -n kube-system
@@ -1593,13 +1462,13 @@ kubectl get ds cilium -n kube-system
 Expected:
 
 ```text
-DESIRED   CURRENT   READY   AVAILABLE
-6         6         6       6
+DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE
+6         6         6       6             6
 ```
 
 ---
 
-## Cilium Nodes
+## 29.3 Cilium Nodes
 
 ```bash
 kubectl get ciliumnodes -o wide
@@ -1607,22 +1476,40 @@ kubectl get ciliumnodes -o wide
 
 ---
 
-## Cilium Configuration
+## 29.4 Effective Configuration
 
 ```bash
 kubectl -n kube-system get configmap cilium-config -o yaml
 ```
 
+Important values:
+
+```text
+routing-mode
+ipv4-native-routing-cidr
+auto-direct-node-routes
+devices
+direct-routing-device
+kube-proxy-replacement
+enable-l2-announcements
+enable-lb-ipam
+enable-hubble
+```
+
 ---
 
-## Native Routing
+## 29.5 Pod CIDRs
 
 ```bash
 kubectl get nodes \
   -o custom-columns=NAME:.metadata.name,PODCIDR:.spec.podCIDR
 ```
 
-And on a node:
+---
+
+## 29.6 Linux Routing
+
+On a node:
 
 ```bash
 ip route
@@ -1640,7 +1527,7 @@ Look for routes such as:
 
 ---
 
-## kube-proxy Replacement Configuration
+## 29.7 kube-proxy Replacement
 
 ```bash
 kubectl -n kube-system get configmap cilium-config -o yaml \
@@ -1653,17 +1540,9 @@ Expected:
 kube-proxy-replacement: "true"
 ```
 
-Also verify whether kube-proxy is still present:
-
-```bash
-kubectl get pods -n kube-system | grep kube-proxy
-```
-
-In the current cluster, kube-proxy Pods are still present.
-
 ---
 
-## L2 Announcement
+## 29.8 L2 Announcements
 
 ```bash
 kubectl get ciliuml2announcementpolicies
@@ -1677,7 +1556,7 @@ kubectl get ciliuml2announcementpolicies -o yaml
 
 ---
 
-## LB IPAM
+## 29.9 LoadBalancer IP Pool
 
 ```bash
 kubectl get ciliumloadbalancerippools
@@ -1691,7 +1570,7 @@ kubectl get ciliumloadbalancerippools -o yaml
 
 ---
 
-## LoadBalancer Services
+## 29.10 LoadBalancer Services
 
 ```bash
 kubectl get svc -A -o wide
@@ -1699,7 +1578,7 @@ kubectl get svc -A -o wide
 
 ---
 
-## Service Connectivity
+## 29.11 Service Connectivity
 
 Create a temporary client:
 
@@ -1711,7 +1590,7 @@ kubectl run cilium-test-client \
   -- sleep 3600
 ```
 
-Check the Pod:
+Check it:
 
 ```bash
 kubectl get pod cilium-test-client \
@@ -1738,41 +1617,48 @@ kubectl exec -it cilium-test-client \
 Cleanup:
 
 ```bash
-kubectl delete pod cilium-test-client -n microservices
+kubectl delete pod cilium-test-client \
+  -n microservices
 ```
-
 
 ---
 
-# 36. Troubleshooting
+# 30. Troubleshooting
 
-## Cilium Pod Not Running
+## 30.1 Cilium Pod Not Running
+
+Check:
 
 ```bash
-kubectl get pods -n kube-system -l k8s-app=cilium -o wide
+kubectl get pods -n kube-system \
+  -l k8s-app=cilium \
+  -o wide
 ```
 
-Then:
+Describe the affected Pod:
 
 ```bash
-kubectl describe pod <cilium-pod> -n kube-system
+kubectl describe pod <cilium-pod> \
+  -n kube-system
 ```
 
 Check logs:
 
 ```bash
-kubectl logs -n kube-system <cilium-pod>
+kubectl logs \
+  -n kube-system \
+  <cilium-pod>
 ```
 
 ---
 
-## Check Effective Cilium Configuration
+## 30.2 Check Cilium Configuration
 
 ```bash
 kubectl -n kube-system get configmap cilium-config -o yaml
 ```
 
-Check the important values:
+Verify:
 
 ```text
 routing-mode
@@ -1787,7 +1673,7 @@ enable-lb-ipam
 
 ---
 
-## Native Routing Troubleshooting
+## 30.3 Native Routing Troubleshooting
 
 Check interfaces:
 
@@ -1801,16 +1687,16 @@ Check routes:
 ip route
 ```
 
-Check that PodCIDRs exist:
+Check PodCIDRs:
 
 ```bash
 kubectl get nodes \
   -o custom-columns=NAME:.metadata.name,PODCIDR:.spec.podCIDR
 ```
 
-The node must have a route toward the destination PodCIDR.
+A destination PodCIDR should have a route through the Pod-fabric interface.
 
-For example:
+Example:
 
 ```text
 10.42.5.0/24 via 172.17.0.26 dev eth2
@@ -1818,21 +1704,21 @@ For example:
 
 ---
 
-## LoadBalancer VIP Not Reachable
+## 30.4 LoadBalancer VIP Troubleshooting
 
-Check:
+Check Services:
 
 ```bash
 kubectl get svc -A -o wide
 ```
 
-Then:
+Check L2 policy:
 
 ```bash
 kubectl get ciliuml2announcementpolicies -o yaml
 ```
 
-And:
+Check IP pool:
 
 ```bash
 kubectl get ciliumloadbalancerippools -o yaml
@@ -1842,21 +1728,22 @@ Verify:
 
 ```text
 VIP belongs to the configured pool
-L2 policy is enabled
+L2 announcements are enabled
 Correct interface is selected
 eth1 is available
-Service has LoadBalancer type
+Service type is LoadBalancer
 ```
-
 
 ---
 
-# 37. Engineering Decision: Native Routing
+# 31. Engineering Decisions
+
+## 31.1 Native Routing
 
 Decision:
 
 ```text
-Use Cilium Native Routing
+Cilium Native Routing
 ```
 
 Instead of:
@@ -1865,22 +1752,23 @@ Instead of:
 VXLAN Overlay
 ```
 
-Reasoning:
+Reasons:
 
-1. The cluster already has a dedicated Pod-fabric network.
+1. The cluster has a dedicated Pod-fabric network.
 2. The Pod-fabric network is reachable between nodes.
 3. PodCIDR routes are installed directly on the nodes.
-4. Cilium can use `eth2` for direct routing.
-5. Avoiding encapsulation simplifies the datapath.
-6. It reduces overlay overhead.
-7. It makes packet troubleshooting easier.
+4. Cilium uses `eth2` for direct routing.
+5. Native routing avoids overlay encapsulation.
+6. The datapath is simpler.
+7. Packet troubleshooting is more straightforward.
 
-The trade-off is that the underlying network must understand or carry routes to the Pod CIDRs.
+Trade-off:
 
+The underlying network must provide reachability to the Pod CIDRs.
 
 ---
 
-# 38. Engineering Decision: Cilium LB IPAM + L2
+## 31.2 LB IPAM + L2 Announcements
 
 Decision:
 
@@ -1890,84 +1778,119 @@ Cilium LB IPAM
 Cilium L2 Announcements
 ```
 
-Reasoning:
+Reasons:
 
-The private cluster does not rely on a cloud provider LoadBalancer.
+1. The cluster is private.
+2. No cloud-provider LoadBalancer is required.
+3. LB IPAM provides controlled VIP allocation.
+4. L2 Announcements provide private network reachability.
+5. The VIP range is isolated in the internal Control Network.
 
-Therefore:
+---
+
+## 31.3 eth2 for Native Pod Routing
+
+Decision:
 
 ```text
+Cilium direct routing device = eth2
+```
+
+Reasons:
+
+1. eth2 belongs to the dedicated Pod-fabric network.
+2. Pod traffic is separated from control traffic.
+3. Pod-to-Pod traffic does not depend on NAT.
+4. Node routes to PodCIDRs use eth2.
+
+---
+
+## 31.4 eth1 for LoadBalancer VIP Advertisement
+
+Decision:
+
+```text
+Cilium L2 Announcement interface = eth1
+```
+
+Reasons:
+
+1. The LoadBalancer VIP range belongs to the Control Network.
+2. eth1 is the Control Network interface.
+3. VIP advertisement remains within the intended private network.
+
+---
+
+## 31.5 Envoy Gateway as Gateway API Implementation
+
+Cilium provides:
+
+```text
+CNI
+eBPF
+Native Routing
+Service Networking
 LB IPAM
+L2 Announcements
 ```
 
-provides the IP allocation mechanism.
-
-And:
+Envoy Gateway provides:
 
 ```text
-L2 Announcement
+Gateway API
+Gateway
+HTTPRoute
+L7 HTTP routing
 ```
 
-provides Layer-2 reachability for the allocated VIP.
-
-This produces a private LoadBalancer architecture suitable for the internal network.
-
-
----
-
-# 39. Engineering Decision: Envoy Gateway vs Cilium Gateway
-
-Cilium is used as the networking foundation.
-
-Envoy Gateway is used as the Gateway API implementation.
-
-Therefore:
-
-```text
-Cilium
-    |
-    +--> eBPF
-    +--> Native Routing
-    +--> Service LB
-    +--> LB IPAM
-    +--> L2 Announcement
-    |
-    v
-Envoy Gateway
-    |
-    +--> Gateway API
-    +--> HTTPRoute
-    +--> L7 Routing
-```
-
-This keeps Layer 3/4 networking and Layer 7 Gateway responsibilities clearly separated.
-
-
----
-
-# 40. Final Cilium Architecture
+The architecture is:
 
 ```mermaid
 flowchart TB
 
-    Client["Client"]
+    Cilium["Cilium"]
 
-    subgraph Network["Private Network"]
+    Network["L3/L4 Networking"]
+
+    Envoy["Envoy Gateway"]
+
+    GatewayAPI["Gateway API"]
+
+    HTTP["HTTP Routing"]
+
+    Cilium --> Network
+    Network --> Envoy
+    Envoy --> GatewayAPI
+    GatewayAPI --> HTTP
+```
+
+This separation keeps networking and application routing responsibilities clear.
+
+---
+
+# 32. Final Cilium Architecture
+
+```mermaid
+flowchart TB
+
+    Client["External Client"]
+
+    subgraph PrivateNetwork["Private Network"]
         Control["Control Network<br/>172.16.0.0/18<br/>eth1"]
         PodFabric["Pod Fabric<br/>172.17.0.0/18<br/>eth2"]
-        NAT["NAT Network<br/>192.168.32.0/20<br/>eth0"]
+        NAT["NAT / Egress<br/>192.168.32.0/20<br/>eth0"]
     end
 
-    subgraph Cilium["Cilium"]
+    subgraph CiliumLayer["Cilium"]
         LBIPAM["LB IPAM"]
-        L2["L2 Announcement"]
+        L2["L2 Announcements"]
         EBPF["eBPF Datapath"]
         Native["Native Routing"]
         ServiceLB["eBPF Service LB"]
         Hubble["Hubble"]
     end
 
-    subgraph Kubernetes["RKE2 Kubernetes"]
+    subgraph RKE2["RKE2 Kubernetes"]
         Gateway["Envoy Gateway"]
         HTTPRoute["HTTPRoute"]
         Frontend["Frontend"]
@@ -1992,172 +1915,144 @@ flowchart TB
 
     EBPF --> Native
     Native --> PodFabric
+
     EBPF --> ServiceLB
     EBPF --> Hubble
 
-    NAT --> Cilium
+    NAT --> CiliumLayer
 ```
 
 ---
 
-# 41. Final Packet Flow Scenarios
+# 33. Final Packet Flow Summary
 
-## Scenario 1: Pod-to-Pod
+## Pod-to-Pod
 
-```text
-Pod A
-  |
-  v
-Cilium eBPF
-  |
-  v
-Native Routing
-  |
-  v
-eth2
-  |
-  v
-Pod Fabric
-  |
-  v
-Destination Node
-  |
-  v
-Cilium eBPF
-  |
-  v
-Pod B
+```mermaid
+flowchart LR
+
+    A["Pod A"]
+
+    C1["Cilium eBPF"]
+
+    R["Native Linux Routing"]
+
+    F["Pod Fabric<br/>eth2"]
+
+    N["Destination Node"]
+
+    C2["Cilium eBPF"]
+
+    B["Pod B"]
+
+    A --> C1
+    C1 --> R
+    R --> F
+    F --> N
+    N --> C2
+    C2 --> B
 ```
 
 ---
 
-## Scenario 2: Pod-to-Service
+## Pod-to-Service
 
-```text
-Pod
-  |
-  v
-ClusterIP
-  |
-  v
-Cilium eBPF Service LB
-  |
-  v
-Selected Backend Pod
+```mermaid
+flowchart LR
+
+    Pod["Pod"]
+
+    Service["ClusterIP Service"]
+
+    LB["Cilium eBPF Service LB"]
+
+    Backend["Backend Pod"]
+
+    Pod --> Service
+    Service --> LB
+    LB --> Backend
 ```
 
 ---
 
-## Scenario 3: External-to-Gateway
+## External-to-Gateway
 
-```text
-Client
-  |
-  v
-172.16.3.102
-  |
-  v
-L2 Announcement
-  |
-  v
-Cilium eBPF
-  |
-  v
-Envoy Gateway
-  |
-  v
-HTTPRoute
-  |
-  +----> Frontend
-  |
-  +----> Backend
+```mermaid
+flowchart LR
+
+    Client["Client"]
+
+    VIP["172.16.3.102"]
+
+    L2["Cilium L2"]
+
+    LB["Cilium Service LB"]
+
+    Envoy["Envoy Gateway"]
+
+    Route["HTTPRoute"]
+
+    App["Application"]
+
+    Client --> VIP
+    VIP --> L2
+    L2 --> LB
+    LB --> Envoy
+    Envoy --> Route
+    Route --> App
 ```
 
 ---
 
-## Scenario 4: Backend-to-Database
+## Backend-to-Database
 
-```text
-Backend Pod
-    |
-    v
-Cilium Service Networking
-    |
-    v
-mysql-router
-    |
-    v
-MySQL Primary / Replica
-```
+```mermaid
+flowchart LR
 
+    Backend["Backend Pod"]
 
----
+    Cilium["Cilium Service Networking"]
 
-# 42. Current Cluster State
+    Router["MySQL Router"]
 
-At the time of documentation:
+    MySQL["MySQL"]
 
-```text
-Cilium Agents:
-6 / 6 Running
-
-Cilium DaemonSet:
-6 / 6 Ready
-
-Routing:
-Native
-
-Native Routing CIDR:
-10.42.0.0/16
-
-Direct Routing Device:
-eth2
-
-Pod Fabric:
-172.17.0.0/18
-
-Cilium Internal Node Networking:
-172.17.0.x
-
-kube-proxy replacement:
-Enabled in Cilium configuration
-
-kube-proxy DaemonSet:
-Still present
-
-LB IPAM:
-Enabled
-
-LB Pool:
-172.16.3.100 - 172.16.3.150
-
-Total LB IPs:
-51
-
-Available:
-48
-
-Used:
-3
-
-L2 Announcements:
-Enabled
-
-L2 Interface:
-eth1
-
-Hubble:
-Enabled
-
-Service Connectivity:
-Verified
+    Backend --> Cilium
+    Cilium --> Router
+    Router --> MySQL
 ```
 
 ---
 
-# 43. Verification Summary
+# 34. Current Cluster State
 
-The Cilium implementation was validated through several layers.
+The current Cilium implementation is:
+
+| Area | Current State |
+|---|---|
+| Cilium Agents | 6/6 Running |
+| Cilium DaemonSet | 6/6 Ready |
+| Routing Mode | Native |
+| Native Routing CIDR | 10.42.0.0/16 |
+| Direct Routing Device | eth2 |
+| Pod Fabric | 172.17.0.0/18 |
+| Pod CIDRs | 10.42.0.0/16 |
+| kube-proxy Replacement | Enabled |
+| LB IPAM | Enabled |
+| LB Pool | 172.16.3.100 - 172.16.3.150 |
+| Total LB IPs | 51 |
+| Used LB IPs | 3 |
+| Available LB IPs | 48 |
+| L2 Announcements | Enabled |
+| L2 Interface | eth1 |
+| Hubble | Enabled |
+| Service Connectivity | Verified |
+
+---
+
+# 35. Verification Summary
+
+The Cilium implementation was validated through multiple layers.
 
 ## Agent Layer
 
@@ -2165,23 +2060,23 @@ All six Cilium agents are Running.
 
 ## Node Layer
 
-All six Kubernetes nodes have Cilium networking information.
+All six Kubernetes nodes have Cilium node information.
 
 ## Routing Layer
 
-PodCIDRs are installed and directly routed through `eth2`.
+Each Kubernetes node has a PodCIDR and cross-node PodCIDR routes are installed through `eth2`.
 
 ## Service Layer
 
-Cilium's kube-proxy replacement configuration is enabled.
+Cilium kube-proxy replacement is enabled in the effective configuration.
 
 ## LoadBalancer Layer
 
-Cilium successfully maintains the configured LoadBalancer IP pool.
+Cilium LB IPAM manages the private LoadBalancer IP pool.
 
 ## L2 Layer
 
-Cilium L2 Announcement policy is configured on `eth1`.
+The LoadBalancer VIPs are configured to be announced through `eth1`.
 
 ## Application Layer
 
@@ -2199,55 +2094,108 @@ status = UP
 database = UP
 ```
 
-This validates the networking path from a Pod through Kubernetes Services to application workloads.
-
+This validates the Kubernetes networking path from a Pod through Kubernetes Services to application workloads.
 
 ---
 
-# 44. What This Layer Provides to the Rest of the Platform
+# 36. Documentation Evidence
 
-Cilium now provides the networking foundation required by the next platform layers.
+The following screenshots provide the main evidence for the Cilium implementation:
 
 ```text
-RKE2
-  |
-  v
-Cilium
-  |
-  +----------------------+
-  |                      |
-  v                      v
-Pod Networking        Service Networking
-  |                      |
-  +----------+-----------+
-             |
-             v
-       Gateway Layer
-             |
-             v
-       Envoy Gateway
-             |
-             v
-       Gateway API
-             |
-             v
-        Applications
-             |
-             v
-      GitOps / Argo CD
-             |
-             v
-     Progressive Delivery
-             |
-             v
-       Argo Rollouts
+screenshots/
+├── 03-Cilium-Agents.png
+├── 04-Cilium-Configuration.png
+├── 05-Cilium-Native-Routing.png
+├── 06-Cilium-LB-IPAM-L2.png
+└── 07-Cilium-Service-Connectivity.png
 ```
 
-Cilium therefore becomes the networking foundation for the remaining Kubernetes platform.
+Each screenshot is used only where it provides meaningful evidence of the corresponding configuration or verification step.
 
 ---
 
-# 45. Next Step
+# 37. Final Design Principles
+
+The final Cilium design can be summarized as:
+
+```mermaid
+flowchart TB
+
+    RKE2["RKE2"]
+
+    Cilium["Cilium"]
+
+    EBPF["eBPF"]
+
+    Native["Native Routing"]
+
+    PodFabric["Dedicated Pod Fabric"]
+
+    ServiceLB["eBPF Service LB"]
+
+    LBIPAM["LB IPAM"]
+
+    L2["L2 Announcements"]
+
+    Gateway["Envoy Gateway"]
+
+    Applications["Applications"]
+
+    RKE2 --> Cilium
+
+    Cilium --> EBPF
+    Cilium --> Native
+    Cilium --> ServiceLB
+    Cilium --> LBIPAM
+    Cilium --> L2
+
+    Native --> PodFabric
+
+    L2 --> Gateway
+    ServiceLB --> Gateway
+
+    Gateway --> Applications
+```
+
+The networking foundation is:
+
+```mermaid
+flowchart TB
+
+    RKE2["RKE2"]
+
+    Cilium["Cilium"]
+
+    EBPF["eBPF Datapath"]
+
+    Native["Native Routing"]
+
+    Service["Service Networking"]
+
+    LB["LB IPAM + L2"]
+
+    Hubble["Hubble"]
+
+    Gateway["Gateway / Applications"]
+
+    RKE2 --> Cilium
+
+    Cilium --> EBPF
+    Cilium --> Native
+    Cilium --> Service
+    Cilium --> LB
+    Cilium --> Hubble
+
+    EBPF --> Gateway
+    Native --> Gateway
+    Service --> Gateway
+    LB --> Gateway
+```
+
+---
+
+# 38. Next Step
 
 The next platform layer is:
 
@@ -2259,41 +2207,30 @@ This layer will document:
 
 - GatewayClass
 - Envoy Gateway
-- Gateway
-- HTTPRoute
-- L7 routing
+- Gateway resources
+- HTTPRoutes
 - Path-based routing
-- Gateway architecture
+- Gateway API architecture
 - External traffic flow
 - Gateway API vs traditional Ingress
-- Multi-tenant routing model
-- Gateway verification and troubleshooting
+- Multi-tenant routing
+- Gateway verification
+- Gateway troubleshooting
 
-The documentation for the next layer will be available under:
+Documentation for the next layer will be located at:
 
 ```text
-docs/03-gateway-api/
+docs/03-gateway-api/README.md
 ```
 
-The Cilium documentation for this layer is located at:
+The Cilium documentation is located at:
 
 ```text
 docs/02-cilium/README.md
 ```
 
-The related Cilium manifests are located at:
+Cilium infrastructure manifests are located at:
 
 ```text
 k8s/infrastructure/cilium/
-```
-
-And the screenshots used in this documentation are located at:
-
-```text
-screenshots/
-├── 03-Cilium-Agents.png
-├── 04-Cilium-Configuration.png
-├── 05-Cilium-Native-Routing.png
-├── 06-Cilium-LB-IPAM-L2.png
-└── 07-Cilium-Service-Connectivity.png
 ```
