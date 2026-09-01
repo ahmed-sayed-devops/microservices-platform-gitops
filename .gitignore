@@ -1,7 +1,7 @@
 # Secrets / credentials
 .env
 .env.*
-*.secret.yaml
+*-secret.yaml
 
 # Backups
 *.backup.yaml
