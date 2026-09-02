@@ -82,4 +82,4 @@ spec:
 
           securityContext:
             allowPrivilegeEscalation: false
-            runAsNonRoot: true
+            runAsNonRoot: false

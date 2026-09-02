@@ -30,7 +30,7 @@ spec:
 
       containers:
         - name: controller
-          image: a7medsayed/mysql-failover-controller:1.7
+          image: a7medsayed/mysql-failover-controller:1.8
           imagePullPolicy: Always
 
           env:
