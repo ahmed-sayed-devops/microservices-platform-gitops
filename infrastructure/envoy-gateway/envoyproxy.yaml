@@ -3,23 +3,14 @@ kind: EnvoyProxy
 metadata:
   name: eg-gateway-workers
   namespace: envoy-gateway-system
-
 spec:
-  logging:
-    level:
-      default: warn
-
   provider:
     type: Kubernetes
-
     kubernetes:
       envoyDeployment:
-        replicas: 3
-
         pod:
           nodeSelector:
             node-role.kubernetes.io/worker: "true"
-
           topologySpreadConstraints:
             - labelSelector:
                 matchLabels:
@@ -27,3 +18,7 @@ spec:
               maxSkew: 1
               topologyKey: kubernetes.io/hostname
               whenUnsatisfiable: DoNotSchedule
+        replicas: 3
+
+      envoyService:
+        externalTrafficPolicy: Cluster

@@ -8,35 +8,32 @@ spec:
   parentRefs:
     - name: eg-gateway
       namespace: gateway-demo
+      sectionName: https
+
+  hostnames:
+    - app.microservices.home.arpa
 
   rules:
-
-    # Backend API
     - matches:
         - path:
             type: PathPrefix
             value: /api
-
       backendRefs:
         - name: backend
           port: 4000
 
-    # Backend Internal API
     - matches:
         - path:
             type: PathPrefix
             value: /internal
-
       backendRefs:
         - name: backend
           port: 4000
 
-    # Frontend
     - matches:
         - path:
             type: PathPrefix
             value: /
-
       backendRefs:
         - name: frontend
           port: 80
