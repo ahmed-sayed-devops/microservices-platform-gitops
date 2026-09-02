@@ -6,7 +6,7 @@ This section implements the north-south application traffic layer using **Kubern
 
 The platform uses:
 
-- Gateway API
+- Kubernetes Gateway API
 - Envoy Gateway
 - Envoy proxy replicas
 - HTTPRoute
@@ -24,7 +24,7 @@ Protocol:    HTTP
 Port:        80
 ```
 
-The Gateway routes external requests to application Services in the `microservices` namespace.
+The Gateway provides a single entry point for application traffic and routes requests to the appropriate application Services.
 
 ---
 
@@ -46,69 +46,53 @@ graph TD
     Route --> Backend
 ```
 
-The traffic path is:
+The final architecture separates the responsibilities of the networking and application traffic layers:
 
-```text
-Client
-  |
-  v
-172.16.3.102
-  |
-  v
-Envoy Gateway
-  |
-  v
-HTTPRoute
-  |
-  +---- / --------> frontend:80
-  |
-  +---- /api -----> backend:4000
-  |
-  +---- /internal -> backend:4000
-```
+- **Cilium** provides cluster networking and LoadBalancer IP management.
+- **Envoy Gateway** implements Gateway API.
+- **HTTPRoute** defines application routing rules.
+- **Services** expose the application workloads internally.
 
 ---
 
 ## 3. Why Gateway API?
 
-Kubernetes originally used `Ingress` as the standard HTTP routing API.
+Kubernetes originally provided `Ingress` as the standard HTTP routing API.
 
-Gateway API provides a more expressive and structured model for traffic management.
+Gateway API introduces a more structured model where infrastructure and application traffic configuration are separated into different resources.
 
-Instead of putting all routing configuration into a single Ingress resource, Gateway API separates responsibilities between different resources.
-
-The main resources used here are:
+The main resources used in this platform are:
 
 | Resource | Responsibility |
 |---|---|
 | GatewayClass | Defines the Gateway controller implementation |
-| Gateway | Defines the actual traffic entry point |
+| Gateway | Defines the traffic entry point |
 | HTTPRoute | Defines HTTP routing rules |
 | Service | Provides access to application workloads |
 
-This separation makes the architecture easier to manage and allows infrastructure and application teams to work with different resources.
+This separation makes the platform easier to manage and provides a cleaner model for multi-application and multi-namespace environments.
 
 ---
 
-## 4. Gateway API Architecture
+# 4. Gateway API Architecture
 
 ```mermaid
 graph TD
     GatewayClass[GatewayClass envoy-gateway]
     Gateway[Gateway eg-gateway]
-    Route[HTTPRoute application-route]
+    HTTPRoute[HTTPRoute application-route]
     Envoy[Envoy Proxy]
     Frontend[Frontend Service]
     Backend[Backend Service]
 
     GatewayClass --> Gateway
     Gateway --> Envoy
-    Route --> Gateway
+    HTTPRoute --> Gateway
     Envoy --> Frontend
     Envoy --> Backend
 ```
 
-The relationship is:
+The relationship between the Gateway API resources is:
 
 ```text
 GatewayClass
@@ -117,7 +101,7 @@ GatewayClass
 Gateway
     |
     v
-Envoy Proxy
+Envoy Gateway
     |
     v
 HTTPRoute
@@ -127,47 +111,62 @@ HTTPRoute
     +----> Backend Service
 ```
 
+The ASCII representation above is only used as a conceptual text representation. The actual architecture diagram is provided using Mermaid so GitHub can render it visually.
+
 ---
 
 # 5. Envoy Gateway
 
-Envoy Gateway is used as the Gateway API implementation.
+Envoy Gateway is the Gateway API implementation used by the final platform.
 
-The GatewayClass uses the Envoy Gateway controller:
+The GatewayClass is controlled by:
 
 ```text
 gateway.envoyproxy.io/gatewayclass-controller
 ```
 
-The controller watches Gateway API resources and configures the Envoy proxy infrastructure accordingly.
+The Envoy Gateway controller watches Gateway API resources and creates and configures the required Envoy proxy infrastructure.
 
-The platform therefore separates responsibilities:
+The responsibility split is:
 
-```text
-RKE2
-  |
-  +-- Kubernetes Control Plane
-  +-- Embedded etcd
+```mermaid
+graph TD
+    RKE2[RKE2]
+    ControlPlane[Kubernetes Control Plane]
+    ETCD[Embedded etcd]
 
-Cilium
-  |
-  +-- eBPF Networking
-  +-- Service Load Balancing
-  +-- LoadBalancer IPAM
-  +-- L2 Announcements
+    Cilium[Cilium]
+    Networking[eBPF Networking]
+    LB[LoadBalancer IP Management]
+    L2[L2 Announcements]
 
-Envoy Gateway
-  |
-  +-- Gateway API
-  +-- HTTP Routing
-  +-- Envoy Proxy
+    EnvoyGateway[Envoy Gateway]
+    GatewayAPI[Gateway API]
+    Routing[HTTP Traffic Routing]
+
+    RKE2 --> ControlPlane
+    RKE2 --> ETCD
+
+    Cilium --> Networking
+    Cilium --> LB
+    Cilium --> L2
+
+    EnvoyGateway --> GatewayAPI
+    EnvoyGateway --> Routing
 ```
+
+This provides a clean separation between:
+
+- Kubernetes control-plane responsibilities.
+- Cluster networking responsibilities.
+- External LoadBalancer addressing.
+- Application traffic routing.
 
 ---
 
 # 6. GatewayClass
 
-The GatewayClass identifies which controller manages the Gateway resources.
+The `GatewayClass` identifies the controller responsible for managing Gateway resources.
 
 The platform uses:
 
@@ -179,16 +178,19 @@ Controller:
 gateway.envoyproxy.io/gatewayclass-controller
 ```
 
-The GatewayClass also references the EnvoyProxy configuration used for the Gateway infrastructure.
+The GatewayClass is associated with the EnvoyProxy configuration used by the Gateway infrastructure.
 
-```text
-GatewayClass
-    |
-    v
-Envoy Gateway Controller
-    |
-    v
-Envoy Proxy Infrastructure
+```mermaid
+graph TD
+    GatewayClass[GatewayClass envoy-gateway]
+    Controller[Envoy Gateway Controller]
+    ProxyConfig[EnvoyProxy Configuration]
+    Proxy[Envoy Proxy]
+
+    GatewayClass --> Controller
+    GatewayClass --> ProxyConfig
+    Controller --> Proxy
+    ProxyConfig --> Proxy
 ```
 
 ### Verification
@@ -197,7 +199,7 @@ Envoy Proxy Infrastructure
 kubectl get gatewayclass -o wide
 ```
 
-Expected result:
+Expected:
 
 ```text
 NAME            CONTROLLER                                      ACCEPTED
@@ -206,7 +208,7 @@ envoy-gateway   gateway.envoyproxy.io/gatewayclass-controller   True
 
 ---
 
-## 7. GatewayClass Evidence
+# 7. GatewayClass Evidence
 
 ![GatewayClass](../../screenshots/08-GatewayClass.png)
 
@@ -221,7 +223,7 @@ The screenshot verifies:
 
 # 8. Gateway
 
-The application traffic entry point is:
+The final application traffic entry point is:
 
 ```text
 Gateway:
@@ -237,250 +239,60 @@ Listener:
 HTTP :80
 ```
 
-The Gateway is configured to accept HTTPRoutes from namespaces allowed by the listener configuration.
+The Gateway is responsible for defining the listener and accepting HTTPRoute resources.
 
-The current Gateway listener allows routes from all namespaces.
+The listener is configured to allow routes from namespaces according to the Gateway configuration.
+
+---
+
+# 9. Gateway Listener
+
+The Gateway exposes an HTTP listener:
+
+```text
+Protocol: HTTP
+Port:     80
+```
+
+The traffic relationship is:
 
 ```mermaid
 graph TD
     Gateway[Gateway eg-gateway]
-    Listener[HTTP Listener :80]
-    Routes[HTTPRoutes]
-    Backend[Application Services]
+    Listener[HTTP Listener Port 80]
+    Routes[HTTPRoute Resources]
+    Services[Application Services]
 
     Gateway --> Listener
     Listener --> Routes
-    Routes --> Backend
+    Routes --> Services
 ```
+
+The Gateway itself does not define the application backend paths.
+
+Those paths are defined by `HTTPRoute`.
 
 ---
 
-## 9. Gateway Address
+# 10. Gateway Address
 
-The Gateway uses:
+The Gateway uses the following external address:
 
 ```text
 172.16.3.102
 ```
 
-This address is allocated from the Cilium LoadBalancer IP pool.
+The address is allocated from the Cilium LoadBalancer IP pool.
 
-The LoadBalancer IP pool is:
+The configured pool is:
 
 ```text
 172.16.3.100 - 172.16.3.150
 ```
 
-Cilium provides the LoadBalancer IP allocation and L2 announcement functionality.
-
-The Envoy Gateway Service receives:
-
-```text
-ClusterIP:
-10.43.198.235
-
-External IP:
-172.16.3.102
-
-Port:
-80
-
-NodePort:
-32411
-```
-
-The important application-facing endpoint is:
-
-```text
-http://172.16.3.102
-```
-
----
-
-# 10. Gateway Evidence
-
-![Gateway](../../screenshots/09-Gateway.png)
-
-The screenshot verifies:
-
-- `eg-gateway` exists in `gateway-demo`.
-- GatewayClass is `envoy-gateway`.
-- Gateway address is `172.16.3.102`.
-- HTTP listener is configured on port `80`.
-- Gateway status is `Programmed=True`.
-
----
-
-# 11. HTTPRoute
-
-The application routing rules are defined using:
-
-```text
-HTTPRoute:
-application-route
-
-Namespace:
-microservices
-```
-
-The route defines three path-based rules.
-
-| Path | Backend | Port |
-|---|---|---:|
-| `/` | frontend | 80 |
-| `/api` | backend | 4000 |
-| `/internal` | backend | 4000 |
-
----
-
-## 12. HTTPRoute Architecture
-
-```mermaid
-graph LR
-    Request[HTTP Request]
-    Route[HTTPRoute]
-    Frontend[Frontend Service]
-    Backend[Backend Service]
-
-    Request --> Route
-    Route -->|/| Frontend
-    Route -->|/api| Backend
-    Route -->|/internal| Backend
-```
-
-This allows the same Gateway IP to expose multiple application endpoints.
-
----
-
-# 13. HTTPRoute Configuration
-
-The routing logic is conceptually:
-
-```text
-/ 
-    -> frontend:80
-
-/api
-    -> backend:4000
-
-/internal
-    -> backend:4000
-```
-
-The backend Service is:
-
-```text
-backend
-10.43.220.95:4000
-```
-
-The frontend Service is:
-
-```text
-frontend
-10.43.48.136:80
-```
-
----
-
-# 14. HTTPRoute Evidence
-
-![HTTPRoute](../../screenshots/10-HTTPRoute.png)
-
-The screenshot verifies:
-
-- `application-route` exists in the `microservices` namespace.
-- `/api` routes to the backend Service.
-- `/internal` routes to the backend Service.
-- `/` routes to the frontend Service.
-- HTTPRoute status is accepted.
-- Backend references are resolved successfully.
-
----
-
-# 15. Cross-Namespace Routing
-
-The Gateway is deployed in:
-
-```text
-gateway-demo
-```
-
-while the application HTTPRoute is deployed in:
-
-```text
-microservices
-```
-
-This demonstrates separation between the infrastructure-facing Gateway layer and the application layer.
-
-```mermaid
-graph TD
-    GatewayNS[gateway-demo]
-    Gateway[Gateway eg-gateway]
-    AppNS[microservices]
-    Route[HTTPRoute application-route]
-    Frontend[Frontend Service]
-    Backend[Backend Service]
-
-    GatewayNS --> Gateway
-    AppNS --> Route
-    Gateway --> Route
-    Route --> Frontend
-    Route --> Backend
-```
-
-The Gateway listener is configured to allow routes from namespaces other than its own.
-
-This enables the Gateway infrastructure to remain independent from individual application namespaces.
-
----
-
-# 16. Envoy Gateway Deployment
-
-Envoy Gateway runs the Envoy proxy infrastructure used by the Gateway.
-
-The deployed proxy replicas are distributed across the worker nodes.
-
-Current Envoy proxy pods include:
-
-```text
-rke2-worke01
-rke2-worke02
-rke2-worke03
-```
-
-This provides multiple Envoy instances instead of relying on a single proxy pod.
-
-```mermaid
-graph TD
-    Gateway[Gateway eg-gateway]
-    Envoy1[Envoy Proxy Worker01]
-    Envoy2[Envoy Proxy Worker02]
-    Envoy3[Envoy Proxy Worker03]
-
-    Gateway --> Envoy1
-    Gateway --> Envoy2
-    Gateway --> Envoy3
-```
-
----
-
-# 17. Envoy Gateway Evidence
-
-![Envoy Gateway](../../screenshots/11-Envoy-Gateway.png)
-
-The screenshot shows the Envoy Gateway controller and Envoy proxy infrastructure running in the cluster.
-
-The final Envoy proxy deployment uses three replicas across the worker nodes.
-
-This provides redundancy at the Gateway proxy layer.
-
----
-
-# 18. Gateway LoadBalancer
-
 The Envoy Gateway Service is exposed as a Kubernetes `LoadBalancer` Service.
+
+Current Service information:
 
 ```text
 Service:
@@ -500,42 +312,244 @@ External IP:
 
 Port:
 80
+
+NodePort:
+32411
 ```
 
-The flow is:
+The application-facing endpoint is:
 
-```mermaid
-graph LR
-    Client[Client]
-    VIP[172.16.3.102]
-    Service[LoadBalancer Service]
-    Envoy[Envoy Proxy]
-
-    Client --> VIP
-    VIP --> Service
-    Service --> Envoy
+```text
+http://172.16.3.102
 ```
-
-Cilium provides the LoadBalancer IP functionality used by the Gateway Service.
 
 ---
 
-# 19. Request Routing
-
-The final HTTP request flow is:
+# 11. Gateway and LoadBalancer Flow
 
 ```mermaid
 graph LR
     Client[Client]
     VIP[172.16.3.102]
+    LB[LoadBalancer Service]
+    Envoy[Envoy Proxy]
+
+    Client --> VIP
+    VIP --> LB
+    LB --> Envoy
+```
+
+Cilium provides the LoadBalancer IP management and L2 announcement functionality used to make the Gateway address reachable on the internal network.
+
+---
+
+# 12. Gateway Evidence
+
+![Gateway](../../screenshots/09-Gateway.png)
+
+The screenshot verifies:
+
+- `eg-gateway` exists in the `gateway-demo` namespace.
+- The GatewayClass is `envoy-gateway`.
+- The Gateway address is `172.16.3.102`.
+- The Gateway uses an HTTP listener on port `80`.
+- Gateway status is `Programmed=True`.
+
+---
+
+# 13. HTTPRoute
+
+Application routing is defined using:
+
+```text
+HTTPRoute:
+application-route
+
+Namespace:
+microservices
+```
+
+The route defines three path-based rules:
+
+| Path | Backend | Port |
+|---|---|---:|
+| `/` | frontend | 80 |
+| `/api` | backend | 4000 |
+| `/internal` | backend | 4000 |
+
+---
+
+# 14. HTTPRoute Architecture
+
+```mermaid
+graph LR
+    Request[HTTP Request]
+    Route[HTTPRoute application-route]
+    Frontend[Frontend Service]
+    Backend[Backend Service]
+
+    Request --> Route
+    Route -->|/| Frontend
+    Route -->|/api| Backend
+    Route -->|/internal| Backend
+```
+
+This allows a single Gateway IP to expose multiple application endpoints.
+
+---
+
+# 15. HTTPRoute Configuration
+
+The routing logic is:
+
+```text
+/ 
+    -> frontend:80
+
+/api
+    -> backend:4000
+
+/internal
+    -> backend:4000
+```
+
+The frontend Service is:
+
+```text
+frontend
+10.43.48.136:80
+```
+
+The backend Service is:
+
+```text
+backend
+10.43.220.95:4000
+```
+
+The HTTPRoute connects the Gateway traffic layer to these application Services.
+
+---
+
+# 16. HTTPRoute Evidence
+
+![HTTPRoute](../../screenshots/10-HTTPRoute.png)
+
+The screenshot verifies:
+
+- `application-route` exists in the `microservices` namespace.
+- `/api` routes to the backend Service.
+- `/internal` routes to the backend Service.
+- `/` routes to the frontend Service.
+- The HTTPRoute is accepted.
+- Backend references are resolved successfully.
+
+---
+
+# 17. Cross-Namespace Routing
+
+The Gateway and HTTPRoute are intentionally separated into different namespaces.
+
+Gateway:
+
+```text
+gateway-demo
+```
+
+HTTPRoute:
+
+```text
+microservices
+```
+
+This provides separation between the Gateway infrastructure layer and the application layer.
+
+```mermaid
+graph TD
+    GatewayNamespace[gateway-demo]
+    Gateway[Gateway eg-gateway]
+
+    AppNamespace[microservices]
+    Route[HTTPRoute application-route]
+
+    Frontend[Frontend Service]
+    Backend[Backend Service]
+
+    GatewayNamespace --> Gateway
+    AppNamespace --> Route
+    Gateway --> Route
+    Route --> Frontend
+    Route --> Backend
+```
+
+The Gateway listener is configured to accept routes from the required namespaces.
+
+This allows applications to define their own routing rules without moving the Gateway infrastructure into the application namespace.
+
+---
+
+# 18. Envoy Gateway Deployment
+
+Envoy Gateway provides the Envoy proxy infrastructure used by the Gateway.
+
+The final proxy deployment uses three replicas distributed across the worker nodes:
+
+```text
+rke2-worke01
+rke2-worke02
+rke2-worke03
+```
+
+The architecture is:
+
+```mermaid
+graph TD
+    Gateway[Gateway eg-gateway]
+
+    Envoy1[Envoy Proxy Worker01]
+    Envoy2[Envoy Proxy Worker02]
+    Envoy3[Envoy Proxy Worker03]
+
+    Gateway --> Envoy1
+    Gateway --> Envoy2
+    Gateway --> Envoy3
+```
+
+This avoids relying on a single Envoy proxy instance.
+
+---
+
+# 19. Envoy Gateway Evidence
+
+![Envoy Gateway](../../screenshots/11-Envoy-Gateway.png)
+
+The screenshot shows:
+
+- Envoy Gateway controller.
+- Envoy proxy infrastructure.
+- Three Envoy proxy replicas.
+- Proxy placement across the worker nodes.
+
+The three proxy replicas provide redundancy at the Gateway layer.
+
+---
+
+# 20. Request Routing
+
+The final request path is:
+
+```mermaid
+graph LR
+    Client[Client]
+    VIP[Gateway VIP 172.16.3.102]
     Envoy[Envoy Gateway]
-    Route[HTTPRoute]
+    Route[HTTPRoute application-route]
 
     Client --> VIP
     VIP --> Envoy
     Envoy --> Route
-    Route -->|/| Frontend[Frontend]
-    Route -->|/api| Backend[Backend]
+    Route -->|/| Frontend[Frontend Service]
+    Route -->|/api| Backend[Backend Service]
     Route -->|/internal| Backend
 ```
 
@@ -577,70 +591,124 @@ backend:4000
 
 ---
 
-# 20. Gateway API vs Ingress
+# 21. Complete Gateway Traffic Flow
 
-Traditional Kubernetes Ingress provides a simpler HTTP routing model.
+This is the complete application traffic path:
 
-Gateway API introduces a more structured model.
+```mermaid
+graph LR
+    Client[Client]
+    VIP[Gateway VIP 172.16.3.102]
+    Envoy[Envoy Gateway]
+    Route[HTTPRoute]
+    Frontend[Frontend Service]
+    Backend[Backend Service]
+    MySQL[MySQL]
+    Redis[Redis]
 
-### Ingress
+    Client --> VIP
+    VIP --> Envoy
+    Envoy --> Route
+    Route -->|/| Frontend
+    Route -->|/api| Backend
+    Route -->|/internal| Backend
+    Backend --> MySQL
+    Backend --> Redis
+```
+
+This represents the actual application flow:
+
+- Client connects to the Gateway VIP.
+- Traffic reaches Envoy Gateway.
+- Envoy processes the HTTPRoute.
+- `/` is routed to the frontend.
+- `/api` is routed to the backend.
+- `/internal` is routed to the backend.
+- The backend communicates with MySQL and Redis.
+
+---
+
+# 22. Gateway API vs Ingress
+
+Traditional Kubernetes Ingress provides HTTP routing using a single resource model.
+
+Gateway API separates the traffic configuration into multiple resources.
+
+### Ingress model
 
 ```text
 Ingress
-   |
-   +-- Routing Rules
-   |
-   +-- Backend Services
+    |
+    +-- Routing Rules
+    |
+    +-- Backend Services
 ```
 
-### Gateway API
+### Gateway API model
 
-```text
-GatewayClass
-   |
-   v
-Gateway
-   |
-   v
-HTTPRoute
-   |
-   +-- Frontend
-   |
-   +-- Backend
+```mermaid
+graph TD
+    GatewayClass[GatewayClass]
+    Gateway[Gateway]
+    HTTPRoute[HTTPRoute]
+    Services[Backend Services]
+
+    GatewayClass --> Gateway
+    Gateway --> HTTPRoute
+    HTTPRoute --> Services
 ```
 
-Gateway API provides a clearer separation of responsibilities.
-
-This is especially useful when infrastructure and application teams manage different parts of the platform.
+Gateway API provides clearer separation of responsibilities and is better suited to larger platforms with multiple applications and teams.
 
 ---
 
-# 21. Why Envoy Gateway?
+# 23. Why Envoy Gateway?
 
-Envoy Gateway was selected as the Gateway API implementation for the final platform.
+Envoy Gateway was selected as the final Gateway API implementation.
 
-The design separates:
+The design keeps Cilium and Envoy Gateway responsibilities separate.
 
-```text
-Cilium
-    |
-    +-- Cluster networking
-    +-- eBPF datapath
-    +-- LoadBalancer IP management
-    +-- L2 announcements
+```mermaid
+graph TD
+    Cilium[Cilium]
+    Network[eBPF Networking]
+    LBIPAM[LoadBalancer IP Management]
+    L2[L2 Announcements]
 
-Envoy Gateway
-    |
-    +-- Gateway API implementation
-    +-- HTTP traffic routing
-    +-- Envoy proxy infrastructure
+    Envoy[Envoy Gateway]
+    GatewayAPI[Gateway API]
+    HTTPRouting[HTTP Routing]
+    Proxy[Envoy Proxy]
+
+    Cilium --> Network
+    Cilium --> LBIPAM
+    Cilium --> L2
+
+    Envoy --> GatewayAPI
+    Envoy --> HTTPRouting
+    Envoy --> Proxy
 ```
 
-This keeps the network datapath and application traffic gateway responsibilities clearly separated.
+### Cilium responsibilities
+
+- Cluster networking.
+- eBPF datapath.
+- LoadBalancer IP management.
+- L2 announcements.
+
+### Envoy Gateway responsibilities
+
+- Gateway API implementation.
+- Gateway resources.
+- HTTPRoute processing.
+- Envoy proxy infrastructure.
+- Application traffic routing.
+
+This separation keeps the architecture easier to understand and maintain.
 
 ---
 
-# 22. Repository Structure
+# 24. Repository Structure
 
 The Gateway resources are kept separately from the application workloads.
 
@@ -668,11 +736,11 @@ k8s/
         └── helmchart.yaml
 ```
 
-The Gateway API resources are therefore GitOps-ready and separated from the application Deployment and Service manifests.
+The Gateway API resources are therefore ready to be managed through GitOps.
 
 ---
 
-# 23. Verification
+# 25. Verification Commands
 
 ## GatewayClass
 
@@ -718,9 +786,13 @@ kubectl get svc -A -o wide
 
 ---
 
-# 24. End-to-End Verification
+# 26. End-to-End Verification
 
-The final Gateway was tested through the actual Gateway IP.
+The Gateway was tested through the actual Gateway IP:
+
+```text
+172.16.3.102
+```
 
 ## Frontend
 
@@ -787,60 +859,11 @@ Expected:
 HTTP/1.1 200 OK
 ```
 
----
-
-# 25. End-to-End Traffic Flow
-
-```mermaid
-graph LR
-    User[User]
-    VIP[172.16.3.102]
-    Envoy[Envoy Gateway]
-    Route[HTTPRoute]
-    Frontend[Frontend]
-    Backend[Backend]
-    MySQL[MySQL]
-    Redis[Redis]
-
-    User --> VIP
-    VIP --> Envoy
-    Envoy --> Route
-    Route -->|/| Frontend
-    Route -->|/api| Backend
-    Route -->|/internal| Backend
-    Backend --> MySQL
-    Backend --> Redis
-```
-
-The complete request path is:
-
-```text
-Client
-  |
-  v
-Gateway VIP
-172.16.3.102
-  |
-  v
-Envoy Gateway
-  |
-  v
-HTTPRoute
-  |
-  +---- / --------> Frontend Service
-  |
-  +---- /api -----> Backend Service
-  |
-  +---- /internal -> Backend Service
-                         |
-                         +----> MySQL
-                         |
-                         +----> Redis
-```
+The request reaches the backend through the `/internal` route.
 
 ---
 
-# 26. End-to-End Evidence
+# 27. End-to-End Evidence
 
 ![Gateway End-to-End](../../screenshots/12-Gateway-End-to-End.png)
 
@@ -855,47 +878,59 @@ http://172.16.3.102/api/products
 http://172.16.3.102/internal/health
 ```
 
-All required routes successfully reached their intended backend Services.
+The requests successfully reached their intended application Services.
 
 ---
 
-# 27. Final State
+# 28. Final Architecture
 
 ```mermaid
 graph TD
     Client[Client]
-    Gateway[Gateway VIP 172.16.3.102]
+    GatewayVIP[Gateway VIP 172.16.3.102]
     Envoy[Envoy Gateway]
-    Route[HTTPRoute]
-    Frontend[Frontend Service]
-    Backend[Backend Service]
-    Database[MySQL]
-    Cache[Redis]
+    HTTPRoute[HTTPRoute]
 
-    Client --> Gateway
-    Gateway --> Envoy
-    Envoy --> Route
-    Route --> Frontend
-    Route --> Backend
-    Backend --> Database
-    Backend --> Cache
+    Frontend[Frontend]
+    Backend[Backend]
+    MySQL[MySQL]
+    Redis[Redis]
+
+    Client --> GatewayVIP
+    GatewayVIP --> Envoy
+    Envoy --> HTTPRoute
+
+    HTTPRoute -->|/| Frontend
+    HTTPRoute -->|/api| Backend
+    HTTPRoute -->|/internal| Backend
+
+    Backend --> MySQL
+    Backend --> Redis
 ```
-
-The final Gateway layer provides:
-
-- Gateway API based traffic management.
-- Envoy Gateway as the Gateway API controller.
-- Three Envoy proxy replicas.
-- A dedicated Gateway VIP.
-- HTTP path-based routing.
-- Cross-namespace Gateway/HTTPRoute separation.
-- Integration with Cilium LoadBalancer IP management.
-- GitOps-ready Kubernetes manifests.
-- End-to-end verified application access.
 
 ---
 
-# 28. Design Summary
+# 29. Final State
+
+The Gateway API layer now provides:
+
+- Kubernetes Gateway API.
+- Envoy Gateway as the Gateway API controller.
+- `envoy-gateway` GatewayClass.
+- `eg-gateway` Gateway.
+- Dedicated Gateway VIP `172.16.3.102`.
+- HTTP listener on port `80`.
+- Three Envoy proxy replicas.
+- Path-based HTTP routing.
+- Cross-namespace Gateway and HTTPRoute separation.
+- Integration with Cilium LoadBalancer IP management.
+- Integration with Cilium L2 announcements.
+- GitOps-ready Kubernetes manifests.
+- End-to-end verified application traffic.
+
+---
+
+# 30. Design Summary
 
 | Component | Final Design |
 |---|---|
@@ -913,14 +948,15 @@ The final Gateway layer provides:
 | Envoy replicas | 3 |
 | LoadBalancer IP management | Cilium |
 | L2 announcement | Cilium |
-| Configuration location | `k8s/apps/gateway` |
+| Gateway manifests | `k8s/apps/gateway` |
+| Envoy Gateway manifests | `k8s/infrastructure/envoy-gateway` |
 | GitOps readiness | Yes |
 
 ---
 
-# 29. Current Platform Flow
+# 31. Current Platform Flow
 
-The platform now has the following layered architecture:
+The platform currently follows this layered model:
 
 ```mermaid
 graph TD
@@ -928,25 +964,25 @@ graph TD
     RKE2[RKE2 HA]
     Cilium[Cilium Networking]
     Gateway[Envoy Gateway]
-    GitOps[GitOps]
     Applications[Applications]
 
     Infrastructure --> RKE2
     RKE2 --> Cilium
     Cilium --> Gateway
-    Gateway --> GitOps
-    GitOps --> Applications
+    Gateway --> Applications
 ```
 
-The Gateway layer therefore sits between the Kubernetes networking layer and the application delivery layer.
+The Gateway layer provides the north-south traffic entry point into the application layer.
+
+The next platform layer is GitOps, where application and infrastructure state will be continuously reconciled from Git.
 
 ---
 
-# 30. Next Step
+# 32. Next Step
 
 The Gateway API layer is complete and verified.
 
-The next section will implement GitOps using Argo CD.
+The next section will implement GitOps using **Argo CD**.
 
 Next documentation:
 
@@ -956,15 +992,14 @@ docs/04-gitops-argocd/README.md
 
 The next platform flow will be:
 
-```text
-Git Repository
-      |
-      v
-   Argo CD
-      |
-      v
-Kubernetes Cluster
-      |
-      v
-Applications
+```mermaid
+graph LR
+    Git[Git Repository]
+    ArgoCD[Argo CD]
+    Cluster[Kubernetes Cluster]
+    Apps[Applications]
+
+    Git --> ArgoCD
+    ArgoCD --> Cluster
+    Cluster --> Apps
 ```
