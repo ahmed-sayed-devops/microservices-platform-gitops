@@ -19,23 +19,20 @@ Automated metric-based promotion and rollback using Prometheus and Argo Rollouts
 
 ## Architecture
 
-~~~mermaid
+```mermaid
 graph TD
-    A[Git Repository] --> B[Argo CD]
-    B --> C[Application Manifests]
-    C --> D[Argo Rollouts]
-
-    D --> E[Backend Canary]
-    D --> F[Frontend BlueGreen]
-
-    E --> G[Gateway API HTTPRoute]
-    G --> H[Envoy Gateway]
-    H --> I[Users]
-
-    F --> J[Frontend Active Service]
+    A["Git Repository"] --> B["Argo CD"]
+    B --> C["Application Manifests"]
+    C --> D["Argo Rollouts"]
+    D --> E["Backend Canary"]
+    D --> F["Frontend Blue/Green"]
+    E --> G["Gateway API HTTPRoute"]
+    G --> H["Envoy Gateway"]
+    H --> I["Users"]
+    F --> J["Frontend Active Service"]
     J --> G
-    F --> K[Frontend Preview Service]
-~~~
+    F --> K["Frontend Preview Service"]
+```
 
 The architecture separates three main responsibilities:
 
@@ -57,7 +54,7 @@ The Application tracks the Git repository and recursively manages manifests unde
 
 The main source configuration is:
 
-~~~yaml
+```yaml
 spec:
   source:
     repoURL: git@github.com:ahmed-sayed-devops/microservices-platform-gitops.git
@@ -65,15 +62,13 @@ spec:
     path: apps
     directory:
       recurse: true
-
   destination:
     server: https://kubernetes.default.svc
-
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-~~~
+```
 
 The Git repository is the source of truth for the desired application state.
 
@@ -87,13 +82,13 @@ The Backend Canary rollout dynamically changes Gateway API HTTPRoute weights.
 
 Therefore, the Argo CD Application ignores only the runtime-managed backend weights:
 
-~~~yaml
+```yaml
 ignoreDifferences:
   - group: gateway.networking.k8s.io
     kind: HTTPRoute
     jqPathExpressions:
       - .spec.rules[].backendRefs[].weight
-~~~
+```
 
 This is intentionally limited to the backend weight fields.
 
@@ -103,16 +98,16 @@ The HTTPRoute remains GitOps-managed, while Argo Rollouts is allowed to modify t
 
 Command:
 
-~~~bash
+```bash
 kubectl get application microservices-platform -n argocd
-~~~
+```
 
 Expected state:
 
-~~~text
-NAME                     SYNC STATUS   HEALTH STATUS
-microservices-platform   Synced        Healthy
-~~~
+```text
+NAME                    SYNC STATUS   HEALTH STATUS
+microservices-platform  Synced        Healthy
+```
 
 ### Evidence
 
@@ -139,18 +134,16 @@ Gateway API is used as the traffic router between the stable and canary Services
 
 The Backend Rollout uses the following strategy:
 
-~~~yaml
+```yaml
 strategy:
   canary:
     stableService: backend-stable
     canaryService: backend-canary
-
     trafficRouting:
       plugins:
         argoproj-labs/gatewayAPI:
           httpRoute: application-route
           namespace: microservices
-
     steps:
       - setWeight: 10
       - pause: {}
@@ -160,27 +153,20 @@ strategy:
       - pause: {}
       - setWeight: 100
       - pause: {}
-~~~
+```
 
 The intended progression is:
 
-~~~text
-10% Canary
-   ↓
-Validation / Pause
-   ↓
-25% Canary
-   ↓
-Validation / Pause
-   ↓
-50% Canary
-   ↓
-Validation / Pause
-   ↓
-100% Canary
-   ↓
-Promotion
-~~~
+```mermaid
+graph TD
+    A["10% Canary"] --> B["Validation / Pause"]
+    B --> C["25% Canary"]
+    C --> D["Validation / Pause"]
+    D --> E["50% Canary"]
+    E --> F["Validation / Pause"]
+    F --> G["100% Canary"]
+    G --> H["Promotion"]
+```
 
 The pause steps are intentionally configured as manual gates in the current lab implementation.
 
@@ -194,18 +180,18 @@ The currently promoted Backend version is:
 
 Command:
 
-~~~bash
+```bash
 kubectl argo rollouts get rollout backend -n microservices
-~~~
+```
 
 The successful runtime state shows:
 
-~~~text
+```text
 Status: Healthy
 Strategy: Canary
 Images:
 a7medsayed/backend:v1.0.2 (stable)
-~~~
+```
 
 The rollout has:
 
@@ -228,13 +214,13 @@ This evidence demonstrates that the Backend Canary rollout completed successfull
 
 Command:
 
-~~~bash
+```bash
 kubectl describe rollout backend -n microservices
-~~~
+```
 
 The configuration contains:
 
-~~~text
+```text
 Strategy:
   Canary
 
@@ -256,7 +242,7 @@ Steps:
 
 Traffic Routing:
   argoproj-labs/gatewayAPI
-~~~
+```
 
 ### Evidence
 
@@ -272,9 +258,9 @@ The Backend uses separate Services for stable and canary traffic.
 
 Command:
 
-~~~bash
+```bash
 kubectl get svc backend-stable backend-canary -n microservices
-~~~
+```
 
 ### Evidence
 
@@ -296,7 +282,7 @@ The HTTPRoute contains references to both backend Services.
 
 The runtime routing state can contain:
 
-~~~yaml
+```yaml
 backendRefs:
   - name: backend-stable
     port: 4000
@@ -305,17 +291,17 @@ backendRefs:
   - name: backend-canary
     port: 4000
     weight: 0
-~~~
+```
 
 During an active Canary rollout, Argo Rollouts changes these weights according to the configured rollout steps.
 
 Command:
 
-~~~bash
+```bash
 kubectl get httproute application-route \
   -n microservices \
   -o yaml
-~~~
+```
 
 ### Evidence
 
@@ -323,17 +309,14 @@ kubectl get httproute application-route \
 
 Screenshot: `18-Backend-Canary-HTTPRoute.png`
 
-This demonstrates the integration between:
+The integration is:
 
-~~~text
-Argo Rollouts
-      ↓
-Gateway API Plugin
-      ↓
-HTTPRoute
-      ↓
-backend-stable / backend-canary
-~~~
+```mermaid
+graph TD
+    A["Argo Rollouts"] --> B["Gateway API Plugin"]
+    B --> C["HTTPRoute"]
+    C --> D["backend-stable / backend-canary"]
+```
 
 The important design point is that Argo Rollouts uses Gateway API routing weights to control how production traffic is distributed between the stable and canary Services.
 
@@ -345,20 +328,18 @@ The Frontend uses the Blue/Green rollout strategy.
 
 The Rollout manages two Services:
 
-~~~text
+```text
 frontend
 frontend-preview
-~~~
+```
 
 Their roles are:
 
-~~~text
-frontend
-    → Active / Production traffic
-
-frontend-preview
-    → Preview / Validation traffic
-~~~
+```mermaid
+graph TD
+    A["frontend"] --> B["Active / Production traffic"]
+    C["frontend-preview"] --> D["Preview / Validation traffic"]
+```
 
 The external Gateway HTTPRoute continues to reference only the `frontend` Service.
 
@@ -370,35 +351,27 @@ Argo Rollouts controls which ReplicaSet each Service selects.
 
 The Frontend Rollout uses:
 
-~~~yaml
+```yaml
 strategy:
   blueGreen:
     activeService: frontend
     previewService: frontend-preview
     autoPromotionEnabled: false
-~~~
+```
 
 The rollout workflow is:
 
-~~~text
-New version committed to Git
-        ↓
-Argo CD reconciliation
-        ↓
-Argo Rollouts creates new ReplicaSet
-        ↓
-New ReplicaSet becomes Preview
-        ↓
-Preview Pods become Ready
-        ↓
-Preview validation
-        ↓
-Manual Promotion
-        ↓
-Active Service switches
-        ↓
-Old ReplicaSet is scaled down
-~~~
+```mermaid
+graph TD
+    A["New version committed to Git"] --> B["Argo CD reconciliation"]
+    B --> C["Argo Rollouts creates new ReplicaSet"]
+    C --> D["New ReplicaSet becomes Preview"]
+    D --> E["Preview Pods become Ready"]
+    E --> F["Preview validation"]
+    F --> G["Manual Promotion"]
+    G --> H["Active Service switches"]
+    H --> I["Old ReplicaSet is scaled down"]
+```
 
 `autoPromotionEnabled: false` creates an explicit validation gate between deployment and production activation.
 
@@ -410,23 +383,23 @@ The successful Frontend release is:
 
 The final successful state is:
 
-~~~text
-v1.0.1 → stable, active
-v1.0.0 → old ReplicaSet, scaled down
-~~~
+```mermaid
+graph LR
+    A["v1.0.1"] --> B["stable, active"]
+    C["v1.0.0"] --> D["old ReplicaSet, scaled down"]
+```
 
 Command:
 
-~~~bash
+```bash
 kubectl argo rollouts get rollout frontend -n microservices
-~~~
+```
 
 Expected successful state:
 
-~~~text
+```text
 Status: Healthy
 Strategy: BlueGreen
-
 Images:
 a7medsayed/frontend:v1.0.1 (stable, active)
 
@@ -437,7 +410,7 @@ stable,active
 revision:1
 frontend-655f4bdcc6
 ScaledDown
-~~~
+```
 
 ### Evidence
 
@@ -451,9 +424,9 @@ This demonstrates that the new Frontend version became the stable Active release
 
 Command:
 
-~~~bash
+```bash
 kubectl get svc frontend frontend-preview -n microservices
-~~~
+```
 
 ### Evidence
 
@@ -465,15 +438,11 @@ The two Services are maintained as part of the Blue/Green lifecycle.
 
 During a rollout:
 
-~~~text
-frontend
-    ↓
-Active ReplicaSet
-
-frontend-preview
-    ↓
-Preview ReplicaSet
-~~~
+```mermaid
+graph TD
+    A["frontend"] --> B["Active ReplicaSet"]
+    C["frontend-preview"] --> D["Preview ReplicaSet"]
+```
 
 The Services use the `rollouts-pod-template-hash` selector to identify the corresponding ReplicaSet.
 
@@ -481,13 +450,13 @@ The Services use the `rollouts-pod-template-hash` selector to identify the corre
 
 Command:
 
-~~~bash
+```bash
 kubectl describe rollout frontend -n microservices
-~~~
+```
 
 The important configuration is:
 
-~~~text
+```text
 Active Service:
   frontend
 
@@ -496,7 +465,7 @@ Preview Service:
 
 Auto Promotion Enabled:
   false
-~~~
+```
 
 The Rollout status also exposes:
 
@@ -539,14 +508,14 @@ This provides user-facing evidence of the successful release.
 
 The complete traffic path is:
 
-~~~mermaid
+```mermaid
 graph LR
-    A[Browser] --> B[Envoy Gateway]
-    B --> C[Gateway API HTTPRoute]
-    C --> D[frontend Service]
-    D --> E[Active ReplicaSet]
-    E --> F[Frontend v1.0.1]
-~~~
+    A["Browser"] --> B["Envoy Gateway"]
+    B --> C["Gateway API HTTPRoute"]
+    C --> D["frontend Service"]
+    D --> E["Active ReplicaSet"]
+    E --> F["Frontend v1.0.1"]
+```
 
 The important distinction is that the Gateway continues routing to the Service named:
 
@@ -568,17 +537,11 @@ The image does not exist, so the new Preview Pods cannot start successfully.
 
 The expected behavior is:
 
-~~~text
-Current Active
-v1.0.1
-    ↓
-Production traffic
-
-New Preview
-v9.9.9
-    ↓
-ImagePullBackOff
-~~~
+```mermaid
+graph TD
+    A["Current Active<br/>v1.0.1"] --> B["Production traffic"]
+    C["New Preview<br/>v9.9.9"] --> D["ImagePullBackOff"]
+```
 
 The important behavior is that the currently active production version remains available while the Preview release fails.
 
@@ -586,9 +549,9 @@ The important behavior is that the currently active production version remains a
 
 Command:
 
-~~~bash
+```bash
 kubectl argo rollouts get rollout frontend -n microservices
-~~~
+```
 
 ### Evidence
 
@@ -602,10 +565,10 @@ The evidence shows the failed Preview ReplicaSet while the existing stable relea
 
 Command:
 
-~~~bash
+```bash
 kubectl get pods -n microservices \
   -l app.kubernetes.io/name=frontend
-~~~
+```
 
 ### Evidence
 
@@ -639,23 +602,25 @@ A failed Preview release does not automatically replace the currently active pro
 
 For the successful Frontend release, promotion was performed manually:
 
-~~~bash
+```bash
 kubectl argo rollouts promote frontend -n microservices
-~~~
+```
 
 Before promotion:
 
-~~~text
-v1.0.0 → Active
-v1.0.1 → Preview
-~~~
+```mermaid
+graph LR
+    A["v1.0.0"] --> B["Active"]
+    C["v1.0.1"] --> D["Preview"]
+```
 
 After promotion:
 
-~~~text
-v1.0.1 → Active
-v1.0.0 → ScaledDown
-~~~
+```mermaid
+graph LR
+    A["v1.0.1"] --> B["Active"]
+    C["v1.0.0"] --> D["ScaledDown"]
+```
 
 This is the final successful state demonstrated in the cluster.
 
@@ -681,17 +646,13 @@ The platform intentionally demonstrates both strategies.
 
 Canary gradually changes the amount of production traffic reaching the new version:
 
-~~~text
-100% Stable
-     ↓
-90% Stable / 10% Canary
-     ↓
-75% Stable / 25% Canary
-     ↓
-50% Stable / 50% Canary
-     ↓
-100% New Version
-~~~
+```mermaid
+graph TD
+    A["100% Stable"] --> B["90% Stable / 10% Canary"]
+    B --> C["75% Stable / 25% Canary"]
+    C --> D["50% Stable / 50% Canary"]
+    D --> E["100% New Version"]
+```
 
 The exact transition is controlled by Argo Rollouts and reflected in the Gateway API HTTPRoute weights.
 
@@ -699,15 +660,11 @@ The exact transition is controlled by Argo Rollouts and reflected in the Gateway
 
 Blue/Green keeps two environments available:
 
-~~~text
-Blue
-Active / Production
-v1.0.0
-
-Green
-Preview
-v1.0.1
-~~~
+```mermaid
+graph TD
+    A["Blue<br/>Active / Production<br/>v1.0.0"]
+    B["Green<br/>Preview<br/>v1.0.1"]
+```
 
 After validation, the Active Service selector is switched to the new ReplicaSet.
 
@@ -715,22 +672,19 @@ After validation, the Active Service selector is switched to the new ReplicaSet.
 
 # 8. GitOps and Progressive Delivery Interaction
 
-~~~mermaid
+```mermaid
 graph TD
-    A[Developer] --> B[Git Commit]
-    B --> C[Git Repository]
-    C --> D[Argo CD]
-    D --> E[Kubernetes Desired State]
-    E --> F[Argo Rollouts]
-
-    F --> G[Backend Canary]
-    F --> H[Frontend BlueGreen]
-
-    G --> I[Gateway API]
-    I --> J[Envoy Gateway]
-
+    A["Developer"] --> B["Git Commit"]
+    B --> C["Git Repository"]
+    C --> D["Argo CD"]
+    D --> E["Kubernetes Desired State"]
+    E --> F["Argo Rollouts"]
+    F --> G["Backend Canary"]
+    F --> H["Frontend BlueGreen"]
+    G --> I["Gateway API"]
+    I --> J["Envoy Gateway"]
     H --> I
-~~~
+```
 
 The important separation of responsibilities is:
 
@@ -771,17 +725,16 @@ Controls:
 
 The demonstrated failed Preview scenario follows this model:
 
-~~~mermaid
+```mermaid
 graph TD
-    A[New Release] --> B[Preview]
-    B --> C{Healthy?}
-    C -->|Yes| D[Validate]
-    D --> E[Promote]
-    E --> F[New Active Version]
-
-    C -->|No| G[Keep Current Active]
-    G --> H[Investigate / Abort / Revert]
-~~~
+    A["New Release"] --> B["Preview"]
+    B --> C{"Healthy?"}
+    C -->|Yes| D["Validate"]
+    D --> E["Promote"]
+    E --> F["New Active Version"]
+    C -->|No| G["Keep Current Active"]
+    G --> H["Investigate / Abort / Revert"]
+```
 
 The key design principle is:
 
@@ -797,9 +750,9 @@ For the current lab, recovery can be performed through Git by reverting the bad 
 
 The current implementation deliberately uses manual promotion:
 
-~~~yaml
+```yaml
 autoPromotionEnabled: false
-~~~
+```
 
 This makes the rollout process explicit and easy to inspect during the lab.
 
@@ -809,13 +762,11 @@ The Frontend does not add `frontend-preview` to the production HTTPRoute.
 
 Instead:
 
-~~~text
-HTTPRoute
-   ↓
-frontend Service
-   ↓
-Active ReplicaSet
-~~~
+```mermaid
+graph TD
+    A["HTTPRoute"] --> B["frontend Service"]
+    B --> C["Active ReplicaSet"]
+```
 
 Argo Rollouts changes the Service selector during the Blue/Green transition.
 
@@ -827,10 +778,11 @@ The Backend Canary uses the Gateway API plugin so that traffic percentages are r
 
 This allows the rollout controller to control:
 
-~~~text
-backend-stable
-backend-canary
-~~~
+```mermaid
+graph TD
+    A["backend-stable"]
+    B["backend-canary"]
+```
 
 through Gateway API weights.
 
@@ -842,17 +794,13 @@ The current lab implementation uses manual pauses and manual promotion.
 
 A future production-oriented enhancement would introduce:
 
-~~~text
-Prometheus
-    ↓
-Argo Rollouts AnalysisTemplate
-    ↓
-AnalysisRun
-    ↓
-Success / Failure
-    ↓
-Promote or Abort
-~~~
+```mermaid
+graph TD
+    A["Prometheus"] --> B["Argo Rollouts AnalysisTemplate"]
+    B --> C["AnalysisRun"]
+    C --> D["Success / Failure"]
+    D --> E["Promote or Abort"]
+```
 
 Possible metrics could include:
 
@@ -889,17 +837,11 @@ This is intentionally documented as a future enhancement rather than part of the
 
 The Progressive Delivery portion of the platform demonstrates two production-relevant rollout strategies:
 
-~~~text
-Backend
-Canary
-10% → 25% → 50% → 100%
-        ↓
-Gateway API traffic shifting
-
-Frontend
-Blue/Green
-Active → Preview → Validation → Promotion
-~~~
+```mermaid
+graph TD
+    A["Backend<br/>Canary<br/>10% → 25% → 50% → 100%"] --> B["Gateway API traffic shifting"]
+    C["Frontend<br/>Blue/Green<br/>Active → Preview → Validation → Promotion"]
+```
 
 Both strategies are managed through Argo Rollouts and integrated into the GitOps workflow through Argo CD.
 
