@@ -19,6 +19,12 @@ spec:
   destination:
     server: https://kubernetes.default.svc
 
+  ignoreDifferences:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      jqPathExpressions:
+        - .spec.rules[].backendRefs[].weight
+
   syncPolicy:
     automated:
       prune: true

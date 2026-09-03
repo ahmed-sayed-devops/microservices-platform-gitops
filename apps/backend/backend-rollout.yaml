@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+
+metadata:
+  name: backend
+  namespace: microservices
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: microservices-platform
+
+spec:
+  replicas: 3
+
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+    scaleDown: progressively
+
+  strategy:
+    canary:
+      stableService: backend-stable
+      canaryService: backend-canary
+
+      trafficRouting:
+        plugins:
+          argoproj-labs/gatewayAPI:
+            httpRoute: application-route
+            namespace: microservices
+
+      steps:
+        - setWeight: 10
+        - pause: {}
+
+        - setWeight: 25
+        - pause: {}
+
+        - setWeight: 50
+        - pause: {}
+
+        - setWeight: 100
+        - pause: {}
