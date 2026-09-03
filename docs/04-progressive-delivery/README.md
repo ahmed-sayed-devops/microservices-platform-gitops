@@ -116,7 +116,7 @@ microservices-platform   Synced        Healthy
 
 ### Evidence
 
-![Argo CD Application Healthy](../screenshots/13-ArgoCD-Healthy.png)
+![Argo CD Application Healthy](../../screenshots/13-ArgoCD-Healthy.png)
 
 Screenshot: `13-ArgoCD-Healthy.png`
 
@@ -218,7 +218,7 @@ The rollout has:
 
 ### Evidence
 
-![Backend Rollout Healthy](../screenshots/14-Backend-Rollout-Healthy.png)
+![Backend Rollout Healthy](../../screenshots/14-Backend-Rollout-Healthy.png)
 
 Screenshot: `14-Backend-Rollout-Healthy.png`
 
@@ -260,7 +260,7 @@ Traffic Routing:
 
 ### Evidence
 
-![Backend Canary Configuration](../screenshots/15-Backend-Canary-Config.png)
+![Backend Canary Configuration](../../screenshots/15-Backend-Canary-Config.png)
 
 Screenshot: `15-Backend-Canary-Config.png`
 
@@ -278,7 +278,7 @@ kubectl get svc backend-stable backend-canary -n microservices
 
 ### Evidence
 
-![Backend Canary Services](../screenshots/17-Backend-Canary-Services.png)
+![Backend Canary Services](../../screenshots/17-Backend-Canary-Services.png)
 
 Screenshot: `17-Backend-Canary-Services.png`
 
@@ -319,7 +319,7 @@ kubectl get httproute application-route \
 
 ### Evidence
 
-![Backend Canary HTTPRoute](../screenshots/18-Backend-Canary-HTTPRoute.png)
+![Backend Canary HTTPRoute](../../screenshots/18-Backend-Canary-HTTPRoute.png)
 
 Screenshot: `18-Backend-Canary-HTTPRoute.png`
 
@@ -441,7 +441,7 @@ ScaledDown
 
 ### Evidence
 
-![Frontend Blue Green Healthy](../screenshots/20-Frontend-BlueGreen-Healthy.png)
+![Frontend Blue Green Healthy](../../screenshots/20-Frontend-BlueGreen-Healthy.png)
 
 Screenshot: `20-Frontend-BlueGreen-Healthy.png`
 
@@ -457,7 +457,7 @@ kubectl get svc frontend frontend-preview -n microservices
 
 ### Evidence
 
-![Frontend Blue Green Services](../screenshots/21-Frontend-BlueGreen-Services.png)
+![Frontend Blue Green Services](../../screenshots/21-Frontend-BlueGreen-Services.png)
 
 Screenshot: `21-Frontend-BlueGreen-Services.png`
 
@@ -509,7 +509,7 @@ The Rollout status also exposes:
 
 ### Evidence
 
-![Frontend Blue Green State](../screenshots/23-Frontend-BlueGreen-State.png)
+![Frontend Blue Green State](../../screenshots/23-Frontend-BlueGreen-State.png)
 
 Screenshot: `23-Frontend-BlueGreen-State.png`
 
@@ -531,7 +531,7 @@ After the successful promotion, the application displays:
 
 ### Evidence
 
-![Frontend Production v1.0.1](../screenshots/24-Frontend-Production-v1.0.1.png)
+![Frontend Production v1.0.1](../../screenshots/24-Frontend-Production-v1.0.1.png)
 
 Screenshot: `24-Frontend-Production-v1.0.1.png`
 
@@ -592,7 +592,7 @@ kubectl argo rollouts get rollout frontend -n microservices
 
 ### Evidence
 
-![Failed Frontend Rollout](../screenshots/25-Failed-Frontend-Rollout.png)
+![Failed Frontend Rollout](../../screenshots/25-Failed-Frontend-Rollout.png)
 
 Screenshot: `25-Failed-Frontend-Rollout.png`
 
@@ -609,7 +609,7 @@ kubectl get pods -n microservices \
 
 ### Evidence
 
-![Failed Preview Pods](../screenshots/26-Failed-Preview-Pods.png)
+![Failed Preview Pods](../../screenshots/26-Failed-Preview-Pods.png)
 
 Screenshot: `26-Failed-Preview-Pods.png`
 
@@ -625,7 +625,7 @@ The production application was tested while the Preview release was failing.
 
 ### Evidence
 
-![Production Unaffected](../screenshots/27-Production-Unaffected.png)
+![Production Unaffected](../../screenshots/27-Production-Unaffected.png)
 
 Screenshot: `27-Production-Unaffected.png`
 
