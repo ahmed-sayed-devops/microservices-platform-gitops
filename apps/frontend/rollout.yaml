@@ -1,5 +1,5 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 
 metadata:
   name: frontend
@@ -62,3 +62,9 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 2
             failureThreshold: 3
+
+  strategy:
+    blueGreen:
+      activeService: frontend
+      previewService: frontend-preview
+      autoPromotionEnabled: false
