@@ -28,7 +28,7 @@ spec:
       containers:
         - name: frontend
 
-          image: a7medsayed/frontend:v1.0.0
+          image: a7medsayed/frontend:v1.0.1
           imagePullPolicy: IfNotPresent
 
           ports:
