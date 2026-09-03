@@ -1,253 +1,139 @@
 # Gateway API with Envoy Gateway
 
-## 1. Overview
+## Overview
 
-This section implements the north-south application traffic layer using **Kubernetes Gateway API** with **Envoy Gateway**.
+Gateway API provides the application entry point into the Kubernetes platform.
 
-The platform uses:
+The implementation uses Envoy Gateway as the Gateway API controller, while Cilium provides the underlying Kubernetes networking, LoadBalancer IP allocation, and L2 announcement capabilities.
 
-- Kubernetes Gateway API
-- Envoy Gateway
-- Envoy proxy replicas
+The Gateway exposes the application through the dedicated LoadBalancer IP `172.16.3.102`.
+
+The application is accessed through:
+
+`https://app.microservices.home.arpa`
+
+TLS is terminated at Envoy Gateway, while HTTPRoute resources define how requests are forwarded to the application services.
+
+## Architecture
+
+The Gateway layer consists of:
+
+- Cilium for Kubernetes networking, eBPF datapath, native routing, LoadBalancer IPAM, and L2 announcements.
+- Envoy Gateway for Gateway API implementation, Envoy proxy management, TLS termination, and HTTP routing.
+- Gateway API resources including GatewayClass, Gateway, and HTTPRoute.
+- Application Services including frontend, backend-stable, and backend-canary.
+
+```mermaid
+graph TD
+    CILIUM["Cilium"]
+    LBIP["LoadBalancer IP<br/>172.16.3.102"]
+    ENVOY["Envoy Gateway"]
+    GATEWAY["Gateway<br/>eg-gateway"]
+    TLS["TLS Termination"]
+    ROUTE["HTTPRoute<br/>application-route"]
+    SERVICES["Application Services"]
+
+    CILIUM --> LBIP
+    LBIP --> ENVOY
+    ENVOY --> GATEWAY
+    GATEWAY --> TLS
+    TLS --> ROUTE
+    ROUTE --> SERVICES
+```
+
+## Why Gateway API
+
+Gateway API was selected instead of the traditional Kubernetes Ingress API because it provides a more structured traffic-management model.
+
+The configuration separates responsibilities between:
+
+- GatewayClass
+- Gateway
 - HTTPRoute
-- Cilium LoadBalancer IPAM
-- Cilium L2 Announcements
-- Kubernetes Services
-- TLS termination at the Gateway
-- HTTPS application routing
 
-The final Gateway is:
+This allows platform infrastructure and application routing to be managed independently.
 
-```text
-Gateway:     eg-gateway
-Namespace:   gateway-demo
-Address:     172.16.3.102
-Protocols:   HTTP :80
-             HTTPS :443
-Hostname:    *.microservices.home.arpa
-```
+A platform administrator can manage the shared Gateway while application teams manage their own HTTPRoutes.
 
-The Gateway provides a single entry point for application traffic and routes requests to the appropriate application Services.
+This also provides a foundation for progressive delivery because Argo Rollouts can modify HTTPRoute backend weights during a canary rollout.
 
----
+## Gateway API Architecture
 
-## 2. Architecture
+The Gateway API resource relationship is:
 
 ```mermaid
 graph TD
-    Client[Client]
-    VIP[Gateway VIP 172.16.3.102]
-    Envoy[Envoy Gateway]
-    TLS[TLS Termination]
-    Route[HTTPRoute]
-    Frontend[Frontend Service]
-    Backend[Backend Service]
+    GATEWAYCLASS["GatewayClass"]
+    GATEWAY["Gateway"]
+    HTTPROUTE["HTTPRoute"]
+    SERVICES["Services"]
+    PODS["Application Pods"]
 
-    Client --> VIP
-    VIP --> Envoy
-    Envoy --> TLS
-    TLS --> Route
-    Route --> Frontend
-    Route --> Backend
+    GATEWAYCLASS --> GATEWAY
+    GATEWAY --> HTTPROUTE
+    HTTPROUTE --> SERVICES
+    SERVICES --> PODS
 ```
 
-The final architecture separates the responsibilities of the networking and application traffic layers:
-
-- **Cilium** provides cluster networking and LoadBalancer IP management.
-- **Cilium L2 Announcements** make the Gateway LoadBalancer IP reachable on the internal network.
-- **Envoy Gateway** implements Gateway API and manages Envoy proxy infrastructure.
-- **Gateway API** defines the Gateway and HTTPRoute resources.
-- **TLS** is terminated at the Gateway.
-- **HTTPRoute** defines application routing rules.
-- **Services** expose the application workloads internally.
-
----
-
-## 3. Why Gateway API?
-
-Kubernetes originally provided `Ingress` as the standard HTTP routing API.
-
-Gateway API introduces a more structured model where infrastructure and application traffic configuration are separated into different resources.
-
-The main resources used in this platform are:
-
-| Resource | Responsibility |
-|---|---|
-| GatewayClass | Defines the Gateway controller implementation |
-| Gateway | Defines the traffic entry point and listeners |
-| HTTPRoute | Defines HTTP routing rules |
-| Service | Provides access to application workloads |
-
-This separation makes the platform easier to manage and provides a cleaner model for multi-application and multi-namespace environments.
-
----
-
-# 4. Gateway API Architecture
-
-```mermaid
-graph TD
-    GatewayClass[GatewayClass envoy-gateway]
-    Gateway[Gateway eg-gateway]
-    HTTPRoute[HTTPRoute application-route]
-    Envoy[Envoy Proxy]
-    Frontend[Frontend Service]
-    Backend[Backend Service]
-
-    GatewayClass --> Gateway
-    Gateway --> Envoy
-    HTTPRoute --> Gateway
-    Envoy --> Frontend
-    Envoy --> Backend
-```
-
-The relationship between the Gateway API resources is:
+The actual implementation uses:
 
 ```text
-GatewayClass
-    |
-    v
-Gateway
-    |
-    v
-Envoy Gateway
-    |
-    v
-HTTPRoute
-    |
-    +----> Frontend Service
-    |
-    +----> Backend Service
-```
-
-The ASCII representation above is only used as a conceptual text representation. The actual architecture diagram is provided using Mermaid so GitHub can render it visually.
-
----
-
-# 5. Envoy Gateway
-
-Envoy Gateway is the Gateway API implementation used by the final platform.
-
-The GatewayClass is controlled by:
-
-```text
-gateway.envoyproxy.io/gatewayclass-controller
-```
-
-The Envoy Gateway controller watches Gateway API resources and creates and configures the required Envoy proxy infrastructure.
-
-The responsibility split is:
-
-```mermaid
-graph TD
-    RKE2[RKE2]
-    ControlPlane[Kubernetes Control Plane]
-    ETCD[Embedded etcd]
-
-    Cilium[Cilium]
-    Networking[eBPF Networking]
-    LB[LoadBalancer IP Management]
-    L2[L2 Announcements]
-
-    EnvoyGateway[Envoy Gateway]
-    GatewayAPI[Gateway API]
-    Routing[HTTP Traffic Routing]
-    TLS[TLS Termination]
-
-    RKE2 --> ControlPlane
-    RKE2 --> ETCD
-
-    Cilium --> Networking
-    Cilium --> LB
-    Cilium --> L2
-
-    EnvoyGateway --> GatewayAPI
-    EnvoyGateway --> Routing
-    EnvoyGateway --> TLS
-```
-
-This provides a clean separation between:
-
-- Kubernetes control-plane responsibilities.
-- Cluster networking responsibilities.
-- External LoadBalancer addressing.
-- Gateway and HTTP routing.
-- TLS termination.
-
----
-
-# 6. GatewayClass
-
-The `GatewayClass` identifies the controller responsible for managing Gateway resources.
-
-The platform uses:
-
-```text
-Name:
+GatewayClass:
 envoy-gateway
 
-Controller:
+Gateway:
+gateway-demo/eg-gateway
+
+HTTPRoute:
+microservices/application-route
+```
+
+## Envoy Gateway
+
+Envoy Gateway is responsible for implementing the Gateway API resources.
+
+The controller is:
+
+```text
 gateway.envoyproxy.io/gatewayclass-controller
 ```
 
-The GatewayClass is associated with the EnvoyProxy configuration used by the Gateway infrastructure.
+The GatewayClass is:
 
-```mermaid
-graph TD
-    GatewayClass[GatewayClass envoy-gateway]
-    Controller[Envoy Gateway Controller]
-    ProxyConfig[EnvoyProxy Configuration]
-    Proxy[Envoy Proxy]
-
-    GatewayClass --> Controller
-    GatewayClass --> ProxyConfig
-    Controller --> Proxy
-    ProxyConfig --> Proxy
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-gateway
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
 ```
 
-### Verification
+The GatewayClass connects the Kubernetes Gateway API resources with Envoy Gateway.
 
-```bash
-kubectl get gatewayclass -o wide
-```
-
-Expected:
-
-```text
-NAME            CONTROLLER                                      ACCEPTED
-envoy-gateway   gateway.envoyproxy.io/gatewayclass-controller   True
-```
-
----
-
-# 7. GatewayClass Evidence
+## GatewayClass Evidence
 
 ![GatewayClass](../../screenshots/08-GatewayClass.png)
 
-The screenshot verifies:
+## Gateway
 
-- `envoy-gateway` GatewayClass exists.
-- The Envoy Gateway controller is registered.
-- GatewayClass status is `Accepted=True`.
-- The GatewayClass references the EnvoyProxy configuration.
+The platform Gateway is:
 
----
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg-gateway
+  namespace: gateway-demo
+```
 
-# 8. Gateway
-
-The final application traffic entry point is:
+The Gateway is exposed through:
 
 ```text
-Gateway:
-eg-gateway
-
-Namespace:
-gateway-demo
-
-Address:
 172.16.3.102
 ```
 
-The Gateway now exposes two listeners:
+It provides two listeners:
 
 ```text
 HTTP
@@ -258,183 +144,92 @@ Port: 443
 Hostname: *.microservices.home.arpa
 ```
 
-The HTTP listener provides the HTTP entry point, while HTTPS is the secure application-facing listener.
+The HTTPS listener is used for application traffic.
 
-The HTTPS listener is configured with the TLS certificate used by the Gateway.
-
-The Gateway is responsible for defining:
-
-- The external listeners.
-- The Gateway address.
-- TLS configuration.
-- Which HTTPRoutes can attach to the Gateway.
-
----
-
-# 9. Gateway Listeners
-
-The final Gateway configuration contains:
+The Gateway allows HTTPRoutes from all namespaces:
 
 ```text
-HTTP Listener
--------------
-Protocol: HTTP
-Port:     80
-
-
-HTTPS Listener
---------------
-Protocol: HTTPS
-Port:     443
-Hostname: *.microservices.home.arpa
-TLS:      Enabled
+allowedRoutes:
+  namespaces:
+    from: All
 ```
 
-The traffic relationship is:
+This allows application namespaces to attach their HTTPRoute resources to the shared Gateway.
 
-```mermaid
-graph TD
-    Gateway[Gateway eg-gateway]
-    HTTP[HTTP Listener :80]
-    HTTPS[HTTPS Listener :443]
-    TLS[TLS Termination]
-    Routes[HTTPRoute Resources]
-    Services[Application Services]
+## Gateway Evidence
 
-    Gateway --> HTTP
-    Gateway --> HTTPS
-    HTTPS --> TLS
-    HTTP --> Routes
-    TLS --> Routes
-    Routes --> Services
-```
+![Gateway](../../screenshots/09-Gateway.png)
 
-The application routing paths are still defined by `HTTPRoute`.
+## TLS Termination
 
-The Gateway only defines the traffic entry points and listener configuration.
+TLS is terminated at Envoy Gateway.
 
----
-
-# 10. TLS Configuration
-
-TLS was added to the final Gateway so that application traffic can be accessed through HTTPS.
-
-The secure endpoint uses:
+The application endpoint is:
 
 ```text
 https://app.microservices.home.arpa
 ```
 
-The Gateway HTTPS listener uses the hostname:
+The Gateway HTTPS listener uses the configured Kubernetes TLS Secret for:
 
 ```text
 *.microservices.home.arpa
 ```
 
-This allows the same Gateway to serve multiple application subdomains, for example:
-
-```text
-app.microservices.home.arpa
-argocd.microservices.home.arpa
-```
-
-The TLS certificate is attached to the HTTPS Gateway listener through the configured Kubernetes TLS Secret.
-
-The high-level flow is:
+The HTTPS request is received by Envoy, TLS is terminated at the Gateway, and the resulting HTTP request is evaluated by the HTTPRoute.
 
 ```mermaid
-graph LR
-    Client[HTTPS Client]
-    VIP[172.16.3.102:443]
-    Envoy[Envoy Gateway]
-    Cert[TLS Certificate]
-    Route[HTTPRoute]
-    Service[Application Service]
+graph TD
+    CLIENT["Client"]
+    HTTPS["HTTPS :443"]
+    VIP["172.16.3.102"]
+    GATEWAY["eg-gateway"]
+    TLS["TLS Termination"]
+    ROUTE["application-route"]
+    SERVICES["Application Services"]
 
-    Client --> VIP
-    VIP --> Envoy
-    Envoy --> Cert
-    Envoy --> Route
-    Route --> Service
+    CLIENT --> HTTPS
+    HTTPS --> VIP
+    VIP --> GATEWAY
+    GATEWAY --> TLS
+    TLS --> ROUTE
+    ROUTE --> SERVICES
 ```
 
-TLS termination occurs at the Gateway/Envoy layer.
+## HSTS
 
-After TLS termination, Envoy evaluates the HTTP request and forwards it to the appropriate Kubernetes Service.
+HSTS is enabled as part of the secure Gateway configuration.
 
----
+Its purpose is to instruct compatible clients to use HTTPS for subsequent requests to the application domain.
 
-# 11. HTTPS Hostname Routing
+```mermaid
+graph TD
+    CLIENT["Client"]
+    HTTPS["HTTPS Request"]
+    GATEWAY["Envoy Gateway"]
+    RESPONSE["HTTPS Response with HSTS"]
+    FUTURE["Future Requests"]
+    SECURE["HTTPS"]
 
-The application HTTPRoute uses the HTTPS Gateway listener.
-
-The Frontend route is associated with:
-
-```text
-Hostname:
-app.microservices.home.arpa
+    CLIENT --> HTTPS
+    HTTPS --> GATEWAY
+    GATEWAY --> RESPONSE
+    RESPONSE --> FUTURE
+    FUTURE --> SECURE
 ```
 
-and the HTTPS Gateway listener:
+## Gateway LoadBalancer
+
+Envoy Gateway creates a Kubernetes LoadBalancer Service.
+
+The Service is:
 
 ```text
-*.microservices.home.arpa
-```
-
-The relationship is:
-
-```text
-Client
-  |
-  | HTTPS
-  v
-172.16.3.102:443
-  |
-  v
-eg-gateway
-  |
-  | TLS termination
-  v
-HTTPRoute
-  |
-  | Host: app.microservices.home.arpa
-  v
-frontend / backend
-```
-
-This provides both:
-
-- Host-based routing.
-- Path-based routing.
-
----
-
-# 12. Gateway Address
-
-The Gateway uses the following external address:
-
-```text
-172.16.3.102
-```
-
-The address is allocated from the Cilium LoadBalancer IP pool.
-
-The configured pool is:
-
-```text
-172.16.3.100 - 172.16.3.150
-```
-
-The Envoy Gateway Service is exposed as a Kubernetes `LoadBalancer` Service.
-
-Current Service information:
-
-```text
-Service:
-envoy-gateway-demo-eg-gateway-c313a88b5
-
 Namespace:
 envoy-gateway-system
+
+Service:
+envoy-gateway-demo-eg-gateway-c313a88b5
 
 Type:
 LoadBalancer
@@ -445,887 +240,699 @@ ClusterIP:
 External IP:
 172.16.3.102
 
-HTTP:
-80
-
-HTTPS:
-443
-
 NodePort:
 32411
 ```
 
-The application-facing secure endpoint is:
+The LoadBalancer IP is provided through the Cilium LoadBalancer implementation.
+
+```mermaid
+graph TD
+    CILIUM["Cilium"]
+    IPAM["LoadBalancer IPAM"]
+    L2["L2 Announcement"]
+    VIP["172.16.3.102"]
+    SERVICE["Envoy Gateway LoadBalancer Service"]
+    ENVOY["Envoy Gateway Pods"]
+
+    CILIUM --> IPAM
+    CILIUM --> L2
+    IPAM --> VIP
+    L2 --> VIP
+    VIP --> SERVICE
+    SERVICE --> ENVOY
+```
+
+## Cilium LoadBalancer Configuration
+
+The LoadBalancer IP pool is:
+
+```yaml
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: gateway-pool
+spec:
+  blocks:
+  - start: 172.16.3.100
+    stop: 172.16.3.150
+```
+
+The pool provides addresses from:
+
+```text
+172.16.3.100 - 172.16.3.150
+```
+
+The Gateway currently uses:
+
+```text
+172.16.3.102
+```
+
+The L2 announcement policy is:
+
+```yaml
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: gateway-l2-policy
+spec:
+  interfaces:
+  - eth1
+  loadBalancerIPs: true
+```
+
+This allows Cilium to announce LoadBalancer addresses on the configured internal network.
+
+## HTTPRoute
+
+The application routing is defined by:
+
+```text
+Namespace:
+microservices
+
+Name:
+application-route
+```
+
+The HTTPRoute attaches to:
+
+```text
+Gateway:
+gateway-demo/eg-gateway
+
+Listener:
+https
+```
+
+The application hostname is:
+
+```text
+app.microservices.home.arpa
+```
+
+The HTTPRoute handles:
+
+```text
+/api
+/internal
+/
+```
+
+The routing model is:
+
+```mermaid
+graph TD
+    REQUEST["Request<br/>app.microservices.home.arpa"]
+    ROUTE["application-route"]
+
+    API["/api"]
+    INTERNAL["/internal"]
+    ROOT["/"]
+
+    BACKEND["backend-stable / backend-canary"]
+    FRONTEND["frontend"]
+
+    REQUEST --> ROUTE
+    ROUTE --> API
+    ROUTE --> INTERNAL
+    ROUTE --> ROOT
+    API --> BACKEND
+    INTERNAL --> BACKEND
+    ROOT --> FRONTEND
+```
+
+## HTTPRoute Configuration
+
+The HTTPRoute uses the HTTPS listener:
+
+```yaml
+parentRefs:
+- name: eg-gateway
+  namespace: gateway-demo
+  sectionName: https
+```
+
+The hostname is:
+
+```yaml
+hostnames:
+- app.microservices.home.arpa
+```
+
+The backend routing is:
+
+```text
+/api       -> backend-stable / backend-canary
+/internal  -> backend-stable / backend-canary
+/          -> frontend
+```
+
+The backend routes are integrated with Argo Rollouts.
+
+During a backend canary rollout, Argo Rollouts updates the backend weights in the HTTPRoute.
+
+This allows traffic to move progressively between the stable and canary versions.
+
+## HTTPRoute Evidence
+
+![HTTPRoute](../../screenshots/10-HTTPRoute.png)
+
+## Cross-Namespace Routing
+
+The Gateway exists in:
+
+```text
+gateway-demo
+```
+
+while the application HTTPRoute exists in:
+
+```text
+microservices
+```
+
+The HTTPRoute references the Gateway across namespaces.
+
+```mermaid
+graph TD
+    APPNS["microservices"]
+    ROUTE["application-route"]
+    GWNS["gateway-demo"]
+    GATEWAY["eg-gateway"]
+
+    APPNS --> ROUTE
+    ROUTE --> GATEWAY
+    GATEWAY --> GWNS
+```
+
+The Gateway allows routes from all namespaces through:
+
+```text
+allowedRoutes.namespaces.from: All
+```
+
+This demonstrates the separation between the shared platform Gateway and application namespaces.
+
+## Envoy Gateway Deployment
+
+Envoy Gateway runs in:
+
+```text
+envoy-gateway-system
+```
+
+The Envoy proxy deployment is configured with three replicas.
+
+The replicas are distributed across worker nodes using topology spread configuration.
+
+This provides redundancy at the Gateway layer.
+
+```mermaid
+graph TD
+    GATEWAY["eg-gateway"]
+    ENVOY1["Envoy Replica 1"]
+    ENVOY2["Envoy Replica 2"]
+    ENVOY3["Envoy Replica 3"]
+
+    GATEWAY --> ENVOY1
+    GATEWAY --> ENVOY2
+    GATEWAY --> ENVOY3
+```
+
+## Envoy Gateway Evidence
+
+![Envoy Gateway](../../screenshots/11-Envoy-Gateway.png)
+
+## HTTPS Application Access
+
+The application is accessed through:
 
 ```text
 https://app.microservices.home.arpa
 ```
 
----
-
-# 13. Gateway and LoadBalancer Flow
-
-```mermaid
-graph LR
-    Client[Client]
-    VIP[172.16.3.102]
-    LB[LoadBalancer Service]
-    Envoy[Envoy Proxy]
-    TLS[TLS Termination]
-
-    Client --> VIP
-    VIP --> LB
-    LB --> Envoy
-    Envoy --> TLS
-```
-
-Cilium provides the LoadBalancer IP management and L2 announcement functionality used to make the Gateway address reachable on the internal network.
-
-Envoy Gateway then handles the application-level traffic and TLS termination.
-
----
-
-# 14. Gateway Evidence
-
-![Gateway](../../screenshots/09-Gateway.png)
-
-The screenshot verifies:
-
-- `eg-gateway` exists in the `gateway-demo` namespace.
-- The GatewayClass is `envoy-gateway`.
-- The Gateway address is `172.16.3.102`.
-- The Gateway is the application traffic entry point.
-
-The final Gateway configuration additionally includes the HTTPS listener on port `443`.
-
----
-
-# 15. HTTPRoute
-
-Application routing is defined using:
+The Gateway uses:
 
 ```text
-HTTPRoute:
-application-route
-
-Namespace:
-microservices
+172.16.3.102:443
 ```
 
-The route defines path-based application rules.
-
-The main application paths are:
-
-| Path | Backend | Port |
-|---|---|---:|
-| `/` | frontend | 80 |
-| `/api` | backend | 4000 |
-| `/internal` | backend | 4000 |
-
-The HTTPRoute is attached to the HTTPS Gateway listener for the application hostname.
-
----
-
-# 16. HTTPRoute Architecture
-
-```mermaid
-graph LR
-    Request[HTTPS Request]
-    Gateway[eg-gateway :443]
-    Route[HTTPRoute application-route]
-    Frontend[Frontend Service]
-    Backend[Backend Service]
-
-    Request --> Gateway
-    Gateway --> Route
-    Route -->|/| Frontend
-    Route -->|/api| Backend
-    Route -->|/internal| Backend
-```
-
-This allows a single secure Gateway IP to expose multiple application endpoints.
-
----
-
-# 17. HTTPRoute Configuration
-
-The routing logic is:
+The hostname is required because the HTTPRoute is configured for:
 
 ```text
-Host:
 app.microservices.home.arpa
-
-/
-    -> frontend:80
-
-/api
-    -> backend:4000
-
-/internal
-    -> backend:4000
 ```
 
-The Frontend Service is:
+```mermaid
+graph TD
+    CLIENT["Client"]
+    HOST["app.microservices.home.arpa"]
+    VIP["172.16.3.102:443"]
+    ENVOY["Envoy Gateway"]
+    TLS["TLS Termination"]
+    ROUTE["HTTPRoute"]
+    SERVICE["Application Service"]
+    POD["Application Pod"]
+
+    CLIENT --> HOST
+    HOST --> VIP
+    VIP --> ENVOY
+    ENVOY --> TLS
+    TLS --> ROUTE
+    ROUTE --> SERVICE
+    SERVICE --> POD
+```
+
+## Request Routing
+
+For a frontend request:
 
 ```text
-frontend
-10.43.48.136:80
+https://app.microservices.home.arpa/
 ```
 
-The Backend Service is:
+the HTTPRoute sends the request to:
 
 ```text
-backend
-10.43.220.95:4000
+frontend:80
 ```
 
-The HTTPRoute connects the Gateway traffic layer to these application Services.
+For backend requests:
 
-For the Backend Canary deployment, the HTTPRoute can also contain both:
+```text
+https://app.microservices.home.arpa/api
+https://app.microservices.home.arpa/internal
+```
+
+the HTTPRoute sends the requests to the backend Services.
+
+During a canary rollout, backend traffic is distributed between:
 
 ```text
 backend-stable
 backend-canary
 ```
 
-with traffic weights controlled by Argo Rollouts.
-
----
-
-# 18. HTTPRoute Evidence
-
-![HTTPRoute](../../screenshots/10-HTTPRoute.png)
-
-The screenshot verifies:
-
-- `application-route` exists in the `microservices` namespace.
-- `/api` routes to the backend Service.
-- `/internal` routes to the backend Service.
-- `/` routes to the frontend Service.
-- The HTTPRoute is accepted.
-- Backend references are resolved successfully.
-
-The final routing is additionally served through the HTTPS Gateway listener.
-
----
-
-# 19. Cross-Namespace Routing
-
-The Gateway and HTTPRoute are intentionally separated into different namespaces.
-
-Gateway:
-
-```text
-gateway-demo
-```
-
-HTTPRoute:
-
-```text
-microservices
-```
-
-This provides separation between the Gateway infrastructure layer and the application layer.
+according to the weights managed by Argo Rollouts.
 
 ```mermaid
 graph TD
-    GatewayNamespace[gateway-demo]
-    Gateway[Gateway eg-gateway]
+    REQUEST["Application Request"]
+    ROUTE["HTTPRoute"]
+    FRONTEND["frontend:80"]
+    STABLE["backend-stable:4000"]
+    CANARY["backend-canary:4000"]
+    ROLLOUT["Argo Rollouts<br/>Traffic Weights"]
 
-    AppNamespace[microservices]
-    Route[HTTPRoute application-route]
-
-    Frontend[Frontend Service]
-    Backend[Backend Service]
-
-    GatewayNamespace --> Gateway
-    AppNamespace --> Route
-    Gateway --> Route
-    Route --> Frontend
-    Route --> Backend
+    REQUEST --> ROUTE
+    ROUTE --> FRONTEND
+    ROUTE --> STABLE
+    ROUTE --> CANARY
+    ROLLOUT --> STABLE
+    ROLLOUT --> CANARY
 ```
 
-The Gateway listener is configured to accept routes from the required namespaces.
-
-This allows applications to define their own routing rules without moving the Gateway infrastructure into the application namespace.
-
----
-
-# 20. Envoy Gateway Deployment
-
-Envoy Gateway provides the Envoy proxy infrastructure used by the Gateway.
-
-The final proxy deployment uses three replicas distributed across the worker nodes:
-
-```text
-rke2-worke01
-rke2-worke02
-rke2-worke03
-```
-
-The architecture is:
+## Complete Gateway Traffic Flow
 
 ```mermaid
 graph TD
-    Gateway[Gateway eg-gateway]
+    CLIENT["Client"]
+    HOST["app.microservices.home.arpa"]
+    VIP["172.16.3.102:443"]
+    CILIUM["Cilium LoadBalancer"]
+    ENVOY["Envoy Gateway"]
+    TLS["TLS Termination"]
+    ROUTE["HTTPRoute"]
+    FRONTEND["frontend:80"]
+    STABLE["backend-stable:4000"]
+    CANARY["backend-canary:4000"]
+    FPODS["Frontend Pods"]
+    SPODS["Backend Stable Pods"]
+    CPODS["Backend Canary Pods"]
 
-    Envoy1[Envoy Proxy Worker01]
-    Envoy2[Envoy Proxy Worker02]
-    Envoy3[Envoy Proxy Worker03]
+    CLIENT --> HOST
+    HOST --> VIP
+    VIP --> CILIUM
+    CILIUM --> ENVOY
+    ENVOY --> TLS
+    TLS --> ROUTE
 
-    Gateway --> Envoy1
-    Gateway --> Envoy2
-    Gateway --> Envoy3
+    ROUTE --> FRONTEND
+    ROUTE --> STABLE
+    ROUTE --> CANARY
+
+    FRONTEND --> FPODS
+    STABLE --> SPODS
+    CANARY --> CPODS
 ```
 
-This avoids relying on a single Envoy proxy instance.
+## Gateway API vs Ingress
 
----
+Traditional Kubernetes Ingress provides a simpler HTTP routing model.
 
-# 21. Envoy Gateway Evidence
-
-![Envoy Gateway](../../screenshots/11-Envoy-Gateway.png)
-
-The screenshot shows:
-
-- Envoy Gateway controller.
-- Envoy proxy infrastructure.
-- Three Envoy proxy replicas.
-- Proxy placement across the worker nodes.
-
-The three proxy replicas provide redundancy at the Gateway layer.
-
----
-
-# 22. HTTPS Application Access
-
-The final application endpoint is:
-
-```text
-https://app.microservices.home.arpa
-```
-
-The HTTPS request flow is:
-
-```mermaid
-graph LR
-    Client[Browser]
-    DNS[app.microservices.home.arpa]
-    VIP[172.16.3.102:443]
-    Envoy[Envoy Gateway]
-    TLS[TLS Termination]
-    Route[HTTPRoute]
-    Frontend[Frontend Service]
-
-    Client --> DNS
-    DNS --> VIP
-    VIP --> Envoy
-    Envoy --> TLS
-    TLS --> Route
-    Route --> Frontend
-```
-
-The Gateway therefore acts as the secure north-south entry point for the application.
-
----
-
-# 23. HSTS
-
-HTTPS is the preferred secure access method for the application.
-
-The application Gateway is accessed through:
-
-```text
-https://app.microservices.home.arpa
-```
-
-HSTS was added as part of the secure Gateway configuration so that clients are instructed to prefer HTTPS for the application.
-
-The security model is therefore:
-
-```text
-HTTP
-  |
-  | Redirect / secure access policy
-  v
-HTTPS
-  |
-  v
-TLS
-  |
-  v
-Envoy Gateway
-  |
-  v
-HTTPRoute
-  |
-  v
-Application Service
-```
-
-HSTS is a browser-side security policy. It complements TLS by preventing a compliant browser from voluntarily falling back to insecure HTTP after the policy has been learned.
-
-The important distinction is:
-
-- **TLS** encrypts and authenticates the connection.
-- **HTTPS** is HTTP carried over TLS.
-- **HSTS** tells compatible browsers to use HTTPS for the protected hostname.
-
----
-
-# 24. Request Routing
-
-The final request path is:
-
-```mermaid
-graph LR
-    Client[Client]
-    VIP[Gateway VIP 172.16.3.102]
-    Envoy[Envoy Gateway]
-    TLS[TLS]
-    Route[HTTPRoute application-route]
-
-    Client --> VIP
-    VIP --> Envoy
-    Envoy --> TLS
-    TLS --> Route
-    Route -->|/| Frontend[Frontend Service]
-    Route -->|/api| Backend[Backend Service]
-    Route -->|/internal| Backend
-```
-
-For example:
-
-```text
-GET https://app.microservices.home.arpa/
-```
-
-is routed to:
-
-```text
-frontend:80
-```
-
-while:
-
-```text
-GET https://app.microservices.home.arpa/api/health
-```
-
-is routed to:
-
-```text
-backend:4000
-```
-
-and:
-
-```text
-GET https://app.microservices.home.arpa/internal/health
-```
-
-is routed to:
-
-```text
-backend:4000
-```
-
----
-
-# 25. Complete Gateway Traffic Flow
-
-This is the complete application traffic path:
-
-```mermaid
-graph LR
-    Client[Client]
-    VIP[172.16.3.102:443]
-    Envoy[Envoy Gateway]
-    TLS[TLS Termination]
-    Route[HTTPRoute]
-    Frontend[Frontend Service]
-    Backend[Backend Service]
-    MySQL[MySQL]
-    Redis[Redis]
-
-    Client --> VIP
-    VIP --> Envoy
-    Envoy --> TLS
-    TLS --> Route
-    Route -->|/| Frontend
-    Route -->|/api| Backend
-    Route -->|/internal| Backend
-    Backend --> MySQL
-    Backend --> Redis
-```
-
-This represents the actual application flow:
-
-- Client connects to the Gateway VIP over HTTPS.
-- Traffic reaches Envoy Gateway.
-- TLS is terminated at the Gateway.
-- Envoy processes the HTTPRoute.
-- `/` is routed to the frontend.
-- `/api` is routed to the backend.
-- `/internal` is routed to the backend.
-- The backend communicates with MySQL and Redis.
-
----
-
-# 26. Gateway API vs Ingress
-
-Traditional Kubernetes Ingress provides HTTP routing using a single resource model.
-
-Gateway API separates the traffic configuration into multiple resources.
-
-### Ingress model
-
-```text
-Ingress
-    |
-    +-- Routing Rules
-    |
-    +-- Backend Services
-```
-
-### Gateway API model
+Gateway API introduces dedicated resources for different responsibilities.
 
 ```mermaid
 graph TD
-    GatewayClass[GatewayClass]
-    Gateway[Gateway]
-    HTTPRoute[HTTPRoute]
-    Services[Backend Services]
+    INGRESS["Ingress Model"]
+    INGRESSRESOURCE["Ingress Resource"]
+    INGRESSCONTROLLER["Ingress Controller"]
+    INGRESSSERVICE["Services"]
 
-    GatewayClass --> Gateway
-    Gateway --> HTTPRoute
-    HTTPRoute --> Services
+    INGRESS --> INGRESSRESOURCE
+    INGRESSRESOURCE --> INGRESSCONTROLLER
+    INGRESSCONTROLLER --> INGRESSSERVICE
 ```
 
-Gateway API provides clearer separation of responsibilities and is better suited to larger platforms with multiple applications and teams.
-
----
-
-# 27. Why Envoy Gateway?
-
-Envoy Gateway was selected as the final Gateway API implementation.
-
-The design keeps Cilium and Envoy Gateway responsibilities separate.
+Gateway API separates these responsibilities:
 
 ```mermaid
 graph TD
-    Cilium[Cilium]
-    Network[eBPF Networking]
-    LBIPAM[LoadBalancer IP Management]
-    L2[L2 Announcements]
+    GCLASS["GatewayClass"]
+    GATEWAY["Gateway"]
+    ROUTE["HTTPRoute"]
+    SERVICES["Services"]
 
-    Envoy[Envoy Gateway]
-    GatewayAPI[Gateway API]
-    HTTPRouting[HTTP Routing]
-    Proxy[Envoy Proxy]
-    TLS[TLS Termination]
-
-    Cilium --> Network
-    Cilium --> LBIPAM
-    Cilium --> L2
-
-    Envoy --> GatewayAPI
-    Envoy --> HTTPRouting
-    Envoy --> Proxy
-    Envoy --> TLS
+    GCLASS --> GATEWAY
+    GATEWAY --> ROUTE
+    ROUTE --> SERVICES
 ```
 
-### Cilium responsibilities
+Gateway API provides better separation of responsibilities and is better suited for shared Gateway infrastructure and advanced traffic-management use cases.
 
-- Cluster networking.
-- eBPF datapath.
-- LoadBalancer IP management.
-- L2 announcements.
+## Why Envoy Gateway
 
-### Envoy Gateway responsibilities
+Envoy Gateway was selected as the Gateway API implementation because it provides:
 
-- Gateway API implementation.
-- Gateway resources.
-- HTTPRoute processing.
-- Envoy proxy infrastructure.
-- HTTP traffic routing.
-- TLS termination.
+- Native Gateway API support
+- Envoy-based proxy architecture
+- TLS termination
+- HTTP routing
+- LoadBalancer integration
+- Multi-namespace Gateway usage
+- Integration with Argo Rollouts through the Gateway API traffic-routing plugin
 
-This separation keeps the architecture easier to understand and maintain.
+The final Gateway implementation is:
 
----
+```mermaid
+graph TD
+    CILIUM["Cilium"]
+    NETWORK["Networking<br/>eBPF / Native Routing"]
+    LB["LoadBalancer IPAM<br/>L2 Announcement"]
+    ENVOY["Envoy Gateway"]
+    GAPI["Gateway API"]
+    ROLLOUT["Argo Rollouts"]
 
-# 28. Repository Structure
+    CILIUM --> NETWORK
+    CILIUM --> LB
+    LB --> ENVOY
+    NETWORK --> ENVOY
+    ENVOY --> GAPI
+    ROLLOUT --> GAPI
+```
 
-The Gateway resources are kept separately from the application workloads.
+Cilium remains responsible for the network and LoadBalancer layer, while Envoy Gateway is responsible for Gateway API traffic processing.
+
+## Repository Structure
 
 ```text
-k8s/
+microservices-platform-gitops/
 ├── apps/
 │   ├── backend/
-│   ├── database/
+│   │   ├── rollout.yaml
+│   │   ├── stable-service.yaml
+│   │   └── canary-service.yaml
+│   │
 │   ├── frontend/
-│   ├── gateway/
-│   │   ├── gateway.yaml
-│   │   └── httproute.yaml
-│   └── redis/
+│   │   ├── rollout.yaml
+│   │   └── preview-service.yaml
+│   │
+│   └── database/
 │
-└── infrastructure/
-    ├── cilium/
-    │   ├── l2-announcement-policy.yaml
-    │   └── loadbalancer-ip-pool.yaml
-    │
-    ├── envoy-gateway/
-    │   ├── envoyproxy.yaml
-    │   └── gatewayclass.yaml
-    │
-    └── longhorn/
-        └── helmchart.yaml
+├── argocd/
+│   └── applications/
+│
+├── infrastructure/
+│
+├── docs/
+│   ├── 01-rke2-ha/
+│   ├── 02-cilium/
+│   ├── 03-gateway-api/
+│   └── ...
+│
+└── screenshots/
 ```
 
-The Gateway API resources are therefore ready to be managed through GitOps.
+Gateway documentation screenshots are stored in the repository root:
 
----
+```text
+screenshots/
+```
 
-# 29. Verification Commands
+The documentation file is located under:
 
-## GatewayClass
+```text
+docs/03-gateway-api/
+```
+
+Therefore screenshots are referenced using:
+
+```text
+../../screenshots/
+```
+
+## Verification Commands
+
+Check GatewayClass:
 
 ```bash
-kubectl get gatewayclass -o wide
+kubectl get gatewayclass
 ```
 
-## Gateway
+Check Gateway:
 
 ```bash
-kubectl get gateway -A -o wide
+kubectl get gateway -n gateway-demo
 ```
 
-## Gateway Details
+Check Gateway details:
 
 ```bash
 kubectl describe gateway eg-gateway -n gateway-demo
 ```
 
-## HTTPRoute
+Check HTTPRoute:
 
 ```bash
-kubectl get httproute -A -o wide
+kubectl get httproute -n microservices
 ```
 
-## HTTPRoute Details
+Check HTTPRoute details:
 
 ```bash
 kubectl describe httproute application-route -n microservices
 ```
 
-## Envoy Gateway Pods
+Check Envoy Gateway pods:
 
 ```bash
 kubectl get pods -n envoy-gateway-system -o wide
 ```
 
-## Gateway Services
+Check Envoy Gateway Service:
 
 ```bash
-kubectl get svc -A -o wide
+kubectl get svc -n envoy-gateway-system
 ```
 
-## TLS Secret
+Check Cilium LoadBalancer IP pool:
 
 ```bash
-kubectl get secret -n gateway-demo
+kubectl get ciliuml2announcementpolicy
+kubectl get ciliumloadbalancerippools
 ```
 
-## Gateway HTTPS Listener
+## End-to-End Verification
+
+The Gateway was verified using the configured application hostname and Gateway address.
+
+Frontend:
 
 ```bash
-kubectl get gateway eg-gateway -n gateway-demo -o yaml
-```
-
----
-
-# 30. End-to-End Verification
-
-The Gateway was tested through the actual Gateway IP:
-
-```text
-172.16.3.102
-```
-
-The final user-facing application endpoint is:
-
-```text
-https://app.microservices.home.arpa
-```
-
-## Frontend
-
-```bash
-curl -k -i --resolve app.microservices.home.arpa:443:172.16.3.102 \
+curl -k --resolve app.microservices.home.arpa:443:172.16.3.102 \
   https://app.microservices.home.arpa/
 ```
 
-Expected:
-
-```text
-HTTP/2 200
-```
-
-The request reaches the frontend application through the HTTPS Gateway.
-
----
-
-## Backend Health
+Backend health:
 
 ```bash
-curl -k -i --resolve app.microservices.home.arpa:443:172.16.3.102 \
+curl -k --resolve app.microservices.home.arpa:443:172.16.3.102 \
   https://app.microservices.home.arpa/api/health
 ```
 
-Expected:
-
-```text
-HTTP/2 200
-```
-
-The backend reports:
-
-```text
-status: UP
-database: UP
-```
-
----
-
-## Backend Products API
+Backend products endpoint:
 
 ```bash
-curl -k -i --resolve app.microservices.home.arpa:443:172.16.3.102 \
+curl -k --resolve app.microservices.home.arpa:443:172.16.3.102 \
   https://app.microservices.home.arpa/api/products
 ```
 
-Expected:
-
-```text
-HTTP/2 200
-```
-
-The API returns the application product data.
-
----
-
-## Internal Backend Route
+Internal endpoint:
 
 ```bash
-curl -k -i --resolve app.microservices.home.arpa:443:172.16.3.102 \
+curl -k --resolve app.microservices.home.arpa:443:172.16.3.102 \
   https://app.microservices.home.arpa/internal/health
 ```
 
-Expected:
+The verification confirmed:
 
-```text
-HTTP/2 200
-```
+- Gateway is programmed.
+- HTTPS listener is active.
+- TLS termination works.
+- HTTPRoute is accepted.
+- Frontend traffic reaches the frontend service.
+- Backend traffic reaches the backend services.
+- Canary traffic can be controlled through HTTPRoute weights.
 
-The request reaches the backend through the `/internal` route.
-
----
-
-# 31. End-to-End Evidence
+## End-to-End Evidence
 
 ![Gateway End-to-End](../../screenshots/12-Gateway-End-to-End.png)
 
-The screenshot verifies the complete application traffic path through the Gateway.
-
-The previously verified application routes are:
-
-```text
-http://172.16.3.102/
-http://172.16.3.102/api/health
-http://172.16.3.102/api/products
-http://172.16.3.102/internal/health
-```
-
-The final Gateway configuration extends this traffic layer with HTTPS and the application hostname:
-
-```text
-https://app.microservices.home.arpa
-```
-
----
-
-# 32. Final Architecture
+## Final Architecture
 
 ```mermaid
 graph TD
-    Client[Client]
-    GatewayVIP[Gateway VIP 172.16.3.102]
-    Envoy[Envoy Gateway]
-    TLS[TLS Termination]
-    HTTPRoute[HTTPRoute]
+    USER["Client"]
+    VIP["172.16.3.102"]
+    CILIUM["Cilium"]
+    ENVOY["Envoy Gateway"]
+    GATEWAY["eg-gateway"]
+    TLS["HTTPS / TLS Termination"]
+    ROUTE["application-route"]
+    FRONT["Frontend Service"]
+    BACK["Backend Services"]
+    FPODS["Frontend Pods"]
+    BPODS["Backend Pods"]
 
-    Frontend[Frontend]
-    Backend[Backend]
-    MySQL[MySQL]
-    Redis[Redis]
-
-    Client --> GatewayVIP
-    GatewayVIP --> Envoy
-    Envoy --> TLS
-    TLS --> HTTPRoute
-
-    HTTPRoute -->|/| Frontend
-    HTTPRoute -->|/api| Backend
-    HTTPRoute -->|/internal| Backend
-
-    Backend --> MySQL
-    Backend --> Redis
+    USER --> VIP
+    VIP --> CILIUM
+    CILIUM --> ENVOY
+    ENVOY --> GATEWAY
+    GATEWAY --> TLS
+    TLS --> ROUTE
+    ROUTE --> FRONT
+    ROUTE --> BACK
+    FRONT --> FPODS
+    BACK --> BPODS
 ```
 
----
-
-# 33. Final Gateway and TLS Flow
-
-The final north-south traffic model is:
-
-```mermaid
-graph LR
-    Client[Client]
-    DNS[app.microservices.home.arpa]
-    VIP[172.16.3.102]
-    Cilium[Cilium LB + L2]
-    Envoy[Envoy Gateway]
-    TLS[TLS / HTTPS]
-    Route[Gateway API HTTPRoute]
-    App[Application Services]
-
-    Client --> DNS
-    DNS --> VIP
-    VIP --> Cilium
-    Cilium --> Envoy
-    Envoy --> TLS
-    TLS --> Route
-    Route --> App
-```
-
-The responsibilities are intentionally separated:
-
-```text
-Cilium
-  ↓
-Network reachability + LoadBalancer IP
-
-Envoy Gateway
-  ↓
-Gateway API + TLS + HTTP routing
-
-HTTPRoute
-  ↓
-Application routing
-
-Kubernetes Services
-  ↓
-Application workloads
-```
-
----
-
-# 34. Final State
-
-The Gateway API layer now provides:
-
-- Kubernetes Gateway API.
-- Envoy Gateway as the Gateway API controller.
-- `envoy-gateway` GatewayClass.
-- `eg-gateway` Gateway.
-- Dedicated Gateway VIP `172.16.3.102`.
-- HTTP listener on port `80`.
-- HTTPS listener on port `443`.
-- Wildcard hostname `*.microservices.home.arpa`.
-- TLS termination at Envoy Gateway.
-- HSTS as part of the secure application access configuration.
-- Three Envoy proxy replicas.
-- Path-based HTTP routing.
-- Host-based application routing.
-- Cross-namespace Gateway and HTTPRoute separation.
-- Integration with Cilium LoadBalancer IP management.
-- Integration with Cilium L2 announcements.
-- GitOps-ready Kubernetes manifests.
-- End-to-end verified application traffic.
-
----
-
-# 35. Design Summary
-
-| Component | Final Design |
-|---|---|
-| Gateway API implementation | Envoy Gateway |
-| GatewayClass | `envoy-gateway` |
-| Gateway | `eg-gateway` |
-| Gateway namespace | `gateway-demo` |
-| Application namespace | `microservices` |
-| Gateway IP | `172.16.3.102` |
-| HTTP listener | `:80` |
-| HTTPS listener | `:443` |
-| HTTPS hostname | `*.microservices.home.arpa` |
-| TLS termination | Envoy Gateway |
-| Application hostname | `app.microservices.home.arpa` |
-| HTTPRoute | `application-route` |
-| Frontend route | `/` |
-| Backend API route | `/api` |
-| Internal route | `/internal` |
-| Envoy replicas | 3 |
-| LoadBalancer IP management | Cilium |
-| L2 announcement | Cilium |
-| Gateway manifests | `k8s/apps/gateway` |
-| Envoy Gateway manifests | `k8s/infrastructure/envoy-gateway` |
-| GitOps readiness | Yes |
-
----
-
-# 36. Current Platform Flow
-
-The platform currently follows this layered model:
+## Final Gateway and TLS Flow
 
 ```mermaid
 graph TD
-    Infrastructure[Infrastructure]
-    RKE2[RKE2 HA]
-    Cilium[Cilium Networking]
-    Gateway[Envoy Gateway]
-    TLS[TLS / HTTPS]
-    Applications[Applications]
+    CLIENT["Client"]
+    HTTPS["HTTPS Request"]
+    VIP["172.16.3.102:443"]
+    ENVOY["Envoy Gateway"]
+    TERMINATE["TLS Termination"]
+    HTTPROUTE["HTTPRoute"]
+    FRONTEND["Frontend"]
+    BACKEND["Backend"]
 
-    Infrastructure --> RKE2
-    RKE2 --> Cilium
-    Cilium --> Gateway
-    Gateway --> TLS
-    TLS --> Applications
+    CLIENT --> HTTPS
+    HTTPS --> VIP
+    VIP --> ENVOY
+    ENVOY --> TERMINATE
+    TERMINATE --> HTTPROUTE
+    HTTPROUTE --> FRONTEND
+    HTTPROUTE --> BACKEND
 ```
 
-The Gateway layer provides the secure north-south traffic entry point into the application layer.
+## Final State
 
-The final traffic flow is:
+The final Gateway implementation can be represented as:
 
-```text
-Client
-  ↓
-HTTPS
-  ↓
-Gateway VIP 172.16.3.102
-  ↓
-Cilium LoadBalancer / L2
-  ↓
-Envoy Gateway
-  ↓
-TLS Termination
-  ↓
-Gateway API HTTPRoute
-  ↓
-Application Service
-  ↓
-Application Pod
+```mermaid
+graph TD
+    CILIUM["Cilium"]
+    LB["LoadBalancer IPAM"]
+    L2["L2 Announcement"]
+    NETWORK["eBPF Networking"]
+    ENVOY["Envoy Gateway"]
+    CLASS["GatewayClass<br/>envoy-gateway"]
+    GATEWAY["Gateway<br/>eg-gateway"]
+    HTTPS["HTTPS :443"]
+    TLS["TLS Termination"]
+    ROUTE["HTTPRoute<br/>application-route"]
+    FRONTEND["frontend"]
+    BACKEND["backend-stable / backend-canary"]
+
+    CILIUM --> LB
+    CILIUM --> L2
+    CILIUM --> NETWORK
+
+    LB --> ENVOY
+    L2 --> ENVOY
+    NETWORK --> ENVOY
+
+    ENVOY --> CLASS
+    CLASS --> GATEWAY
+    GATEWAY --> HTTPS
+    HTTPS --> TLS
+    TLS --> ROUTE
+
+    ROUTE --> FRONTEND
+    ROUTE --> BACKEND
+```
+
+## Design Summary
+
+The Gateway architecture separates networking, Gateway infrastructure, routing, and application workloads.
+
+Cilium provides the underlying network connectivity and LoadBalancer functionality.
+
+Envoy Gateway implements the Gateway API and handles TLS termination and HTTP traffic processing.
+
+Gateway API resources provide the routing model.
+
+Argo Rollouts integrates with HTTPRoute to control backend canary traffic.
+
+The architecture provides:
+
+- Dedicated internal LoadBalancer IP.
+- HTTPS access through the application domain.
+- TLS termination at the Gateway.
+- HSTS security behavior.
+- Shared Gateway infrastructure.
+- Namespace-level application routing.
+- Progressive delivery integration.
+- Separation between platform networking and application routing.
+
+## Current Platform Flow
+
+```mermaid
+graph TD
+    CLIENT["Client"]
+    DOMAIN["app.microservices.home.arpa"]
+    VIP["172.16.3.102:443"]
+    CILIUM["Cilium"]
+    ENVOY["Envoy Gateway"]
+    GATEWAY["eg-gateway"]
+    ROUTE["application-route"]
+    FRONTEND["frontend"]
+    BACKEND["backend-stable / backend-canary"]
+
+    CLIENT --> DOMAIN
+    DOMAIN --> VIP
+    VIP --> CILIUM
+    CILIUM --> ENVOY
+    ENVOY --> GATEWAY
+    GATEWAY --> ROUTE
+    ROUTE --> FRONTEND
+    ROUTE --> BACKEND
 ```
 
 The Gateway layer is now integrated with the secure external access model and is ready to serve the GitOps-managed application platform.
