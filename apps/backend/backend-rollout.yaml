@@ -26,7 +26,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: a7medsayed/backend:v1.0.3
+          image: a7medsayed/backend:v9.9.9
           imagePullPolicy: IfNotPresent
 
           ports:
