@@ -5,6 +5,7 @@ metadata:
   namespace: monitoring
   labels:
     release: monitoring
+
 spec:
   groups:
     - name: microservices.rollouts
@@ -15,14 +16,14 @@ spec:
               rollout_info{
                 exported_namespace="microservices",
                 name="backend",
-                phase=~"Degraded|Error|Aborted"
+                phase=~"Timeout|Degraded|Error|Aborted"
               }
             ) == 1
           for: 30s
           labels:
-            severity: critical
-            service: backend
             namespace: monitoring
+            service: backend
+            severity: critical
           annotations:
             summary: "Backend rollout failed"
             description: "The backend Argo Rollout entered a failed state."
