@@ -1,9 +1,40 @@
-# Private RKE2 Kubernetes Platform
+<div align="center">
 
-Production-oriented private Kubernetes platform built with RKE2, Cilium, Gateway API, Envoy Gateway, Argo CD, Argo Rollouts, Longhorn, MySQL HA, and Redis.
+# 🚀 Private RKE2 Kubernetes Platform
 
-The platform is designed around clear separation of responsibilities across infrastructure, networking, ingress, application delivery, storage, and stateful workloads.
+### Enterprise Private Kubernetes Platform with **RKE2 • Cilium • Gateway API • Envoy Gateway • Argo CD • Argo Rollouts • Longhorn • MySQL HA • Redis**
 
+<p align="center">
+
+![RKE2](https://img.shields.io/badge/RKE2-2563EB?style=for-the-badge&logo=kubernetes&logoColor=white)
+
+![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)
+
+![Cilium](https://img.shields.io/badge/Cilium-F8C517?style=for-the-badge&logo=cilium&logoColor=black)
+
+![Envoy Gateway](https://img.shields.io/badge/Envoy%20Gateway-FF6B35?style=for-the-badge&logo=envoyproxy&logoColor=white)
+
+![Argo CD](https://img.shields.io/badge/Argo%20CD-EF7B4D?style=for-the-badge&logo=argo&logoColor=white)
+
+![Argo Rollouts](https://img.shields.io/badge/Argo%20Rollouts-EF7B4D?style=for-the-badge&logo=argo&logoColor=white)
+
+![Longhorn](https://img.shields.io/badge/Longhorn-0F172A?style=for-the-badge&logo=linux&logoColor=white)
+
+![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
+
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+
+![GitOps](https://img.shields.io/badge/GitOps-2088FF?style=for-the-badge&logo=git&logoColor=white)
+
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+
+</p>
+
+Private production-oriented Kubernetes platform built from scratch using **RKE2**, with a highly available control plane, dedicated network architecture, **Cilium eBPF networking**, **Gateway API with Envoy Gateway**, GitOps through **Argo CD**, progressive delivery with **Argo Rollouts**, persistent storage through **Longhorn**, and a stateful data layer based on **MySQL HA and Redis**.
+
+</div>
+
+**---**
 ---
 
 # 🏗️ Architecture Domain
