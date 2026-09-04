@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: backend-availability
+  namespace: microservices
+spec:
+  metrics:
+    - name: backend-available-replicas
+      interval: 30s
+      count: 1
+      successCondition: result[0] >= 3
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(
+              rollout_info_replicas_available{
+                namespace="argo-rollouts",
+                name="backend"
+              }
+            ) or vector(0)
