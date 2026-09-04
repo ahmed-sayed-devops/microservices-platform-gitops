@@ -18,27 +18,28 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Check Git diff
         run: git diff --check
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
       - name: Install yamllint
-        run: pip install yamllint
+        run: python -m pip install yamllint
 
       - name: Validate YAML
         run: |
-          yamllint -d relaxed apps infrastructure argocd
+          yamllint -c .yamllint.yml apps infrastructure argocd
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: stable
+          cache: false
 
       - name: Install kubeconform
         run: |
