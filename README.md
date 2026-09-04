@@ -28,7 +28,7 @@ Private production-oriented Kubernetes platform built from scratch using **RKE2*
 
 # 🏗️ Architecture Domain
 
-![Architecture Domain](./Architecture%20Domain.png)
+![Architecture Domain](./Architecture.png)
 
 The architecture above provides the high-level view of the complete platform.
 
