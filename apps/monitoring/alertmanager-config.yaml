@@ -21,13 +21,21 @@ spec:
     - name: telegram
       telegramConfigs:
         - sendResolved: true
+
           botToken:
             name: alertmanager-telegram
             key: bot-token
+
           chatID: 8899077998
+
           parseMode: HTML
+
           message: |
+            {{ if eq .Status "firing" }}
             <b>🚨 Backend Rollout Failed</b>
+            {{ else }}
+            <b>✅ Backend Rollout Recovered</b>
+            {{ end }}
 
             <b>Alert:</b> {{ .CommonLabels.alertname }}
             <b>Service:</b> {{ .CommonLabels.service }}
