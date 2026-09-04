@@ -6,7 +6,7 @@ metadata:
 spec:
   metrics:
     - name: backend-available-replicas
-      interval: 30s
+      initialDelay: 15s
       count: 1
       successCondition: result[0] >= 3
       failureLimit: 1
