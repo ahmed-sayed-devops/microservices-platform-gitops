@@ -5,18 +5,33 @@ metadata:
   namespace: microservices
 spec:
   metrics:
-    - name: backend-available-replicas
+    - name: backend-http-success-rate
       initialDelay: 15s
       count: 1
-      successCondition: result[0] >= 3
-      failureLimit: 1
+      failureLimit: 0
+      successCondition: result[0] >= 0.95
       provider:
         prometheus:
           address: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
           query: |
-            sum(
-              rollout_info_replicas_available{
-                namespace="argo-rollouts",
-                name="backend"
-              }
-            ) or vector(0)
+            (
+              sum(
+                rate(
+                  http_requests_total{
+                    service="backend-canary",
+                    route="/",
+                    status=~"2.."
+                  }[2m]
+                )
+              )
+              /
+              sum(
+                rate(
+                  http_requests_total{
+                    service="backend-canary",
+                    route="/"
+                  }[2m]
+                )
+              )
+            )
+            or vector(0)

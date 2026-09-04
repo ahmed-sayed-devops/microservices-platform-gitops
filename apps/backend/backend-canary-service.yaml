@@ -1,22 +1,19 @@
 apiVersion: v1
 kind: Service
-
 metadata:
   name: backend-canary
   namespace: microservices
   labels:
-    app.kubernetes.io/name: backend
     app.kubernetes.io/component: api
+    app.kubernetes.io/name: backend
     app.kubernetes.io/part-of: microservices-platform
-
+    monitoring: backend-canary
 spec:
-  type: ClusterIP
-
+  selector:
+    app.kubernetes.io/name: backend
   ports:
     - name: http
       port: 4000
-      protocol: TCP
       targetPort: http
-
-  selector:
-    app.kubernetes.io/name: backend
+      protocol: TCP
+  type: ClusterIP
