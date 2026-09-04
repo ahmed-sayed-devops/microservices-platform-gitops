@@ -3,7 +3,7 @@
 # 🚀 Private RKE2 Kubernetes Platform
 
 ### Enterprise Private Kubernetes Platform
-### RKE2 • Cilium • Gateway API • Envoy Gateway • Argo CD • Argo Rollouts • Longhorn • MySQL HA • Redis
+**RKE2 • Cilium • Gateway API • Envoy Gateway • Argo CD • Argo Rollouts • Longhorn • MySQL HA • Redis**
 
 <br>
 
@@ -24,7 +24,6 @@ Private production-oriented Kubernetes platform built from scratch using **RKE2*
 </div>
 
 ---
-
 
 # 🏗️ Architecture Domain
 
@@ -55,6 +54,8 @@ This project implements a private Kubernetes platform with:
 - Envoy Gateway
 - HTTPS and TLS termination
 - Argo CD GitOps
+- GitHub Actions CI
+- Pull Request manifest validation
 - Argo Rollouts
 - Backend Canary deployments
 - Frontend Blue/Green deployments
@@ -74,41 +75,24 @@ The platform follows a layered architecture where each component has a clearly d
 
 ```mermaid
 graph TD
-
     USER["Users / Clients"]
-
     DNS["Application DNS<br/>app.microservices.home.arpa"]
-
     VIP["Gateway VIP<br/>172.16.3.102"]
-
     CILIUM["Cilium<br/>eBPF / Native Routing<br/>LB IPAM / L2"]
-
     ENVOY["Envoy Gateway"]
-
     GATEWAY["Gateway<br/>eg-gateway"]
-
     TLS["TLS Termination"]
-
     ROUTE["HTTPRoute<br/>application-route"]
-
     FRONTEND["Frontend<br/>Blue/Green"]
-
     BACKEND["Backend<br/>Canary"]
-
     REDIS["Redis<br/>Cache"]
-
     HAPROXY["HAProxy<br/>mysql-router"]
-
     MYSQL_PRIMARY["MySQL<br/>Current Primary"]
-
     MYSQL_REPLICA["MySQL<br/>Replica"]
-
     LONGHORN["Longhorn<br/>Persistent Storage"]
-
     GIT["Git Repository"]
-
+    CI["GitHub Actions<br/>CI Validation"]
     ARGOCD["Argo CD<br/>GitOps"]
-
     ROLLOUTS["Argo Rollouts<br/>Progressive Delivery"]
 
     USER --> DNS
@@ -118,22 +102,19 @@ graph TD
     ENVOY --> GATEWAY
     GATEWAY --> TLS
     TLS --> ROUTE
-
     ROUTE --> FRONTEND
     ROUTE --> BACKEND
-
     BACKEND --> REDIS
     BACKEND --> HAPROXY
-
     HAPROXY --> MYSQL_PRIMARY
     HAPROXY -. Failover .-> MYSQL_REPLICA
-
     MYSQL_PRIMARY --> LONGHORN
     MYSQL_REPLICA --> LONGHORN
 
+    GIT --> CI
+    CI --> ARGOCD
     GIT --> ARGOCD
     ARGOCD --> ROLLOUTS
-
     ROLLOUTS --> FRONTEND
     ROLLOUTS --> BACKEND
 ```
@@ -160,7 +141,9 @@ The cluster contains three control-plane nodes and three worker nodes.
 
 The cluster runs:
 
-`v1.35.7+rke2r1`
+```text
+v1.35.7+rke2r1
+```
 
 The control plane uses embedded etcd.
 
@@ -168,19 +151,15 @@ Three control-plane nodes provide an HA control-plane architecture where etcd ma
 
 ```mermaid
 graph TD
-
     CP1["rke2-cp1"]
     CP2["k8s-rke2-cp2"]
     CP3["k8s-rke2-cp3"]
-
     ETCD["Embedded etcd<br/>3 Members"]
-
     QUORUM["Quorum<br/>2 Members Required"]
 
     CP1 --> ETCD
     CP2 --> ETCD
     CP3 --> ETCD
-
     ETCD --> QUORUM
 ```
 
@@ -207,13 +186,9 @@ The internal Kubernetes networks use MTU 1400.
 
 ```mermaid
 graph TD
-
     NODE["Kubernetes Node"]
-
     CONTROL["Control Network<br/>172.16.0.0/18<br/>MTU 1400"]
-
     POD["Pod Fabric<br/>172.17.0.0/18<br/>MTU 1400"]
-
     NAT["NAT Network<br/>Internet Egress"]
 
     NODE --> CONTROL
@@ -221,9 +196,7 @@ graph TD
     NODE --> NAT
 
     CONTROL --> API["Kubernetes API<br/>Control Plane Traffic"]
-
     POD --> CILIUM["Cilium<br/>Pod Networking"]
-
     NAT --> INTERNET["Internet<br/>Packages / Images"]
 ```
 
@@ -257,15 +230,10 @@ The platform uses native routing instead of relying on an overlay network for th
 
 ```mermaid
 graph LR
-
     POD1["Pod<br/>Worker 01"]
-
     CILIUM1["Cilium eBPF"]
-
     ROUTING["Native Routing<br/>Pod Fabric"]
-
     CILIUM2["Cilium eBPF"]
-
     POD2["Pod<br/>Worker 02"]
 
     POD1 --> CILIUM1
@@ -288,11 +256,15 @@ Cilium provides the underlying Kubernetes networking capabilities together with 
 
 The Gateway is exposed through:
 
-`172.16.3.102`
+```text
+172.16.3.102
+```
 
 The application endpoint is:
 
-`https://app.microservices.home.arpa`
+```text
+https://app.microservices.home.arpa
+```
 
 The Gateway layer consists of:
 
@@ -305,23 +277,14 @@ The Gateway layer consists of:
 
 ```mermaid
 graph TD
-
     CLIENT["Client"]
-
     VIP["172.16.3.102"]
-
     CILIUM["Cilium<br/>LB IPAM + L2"]
-
     ENVOY["Envoy Gateway"]
-
     GCLASS["GatewayClass<br/>envoy-gateway"]
-
     GATEWAY["Gateway<br/>eg-gateway"]
-
     TLS["HTTPS<br/>TLS Termination"]
-
     ROUTE["HTTPRoute<br/>application-route"]
-
     SERVICES["Application Services"]
 
     CLIENT --> VIP
@@ -346,17 +309,12 @@ The application HTTPRoute exposes frontend and backend paths.
 
 ```mermaid
 graph TD
-
     ROUTE["application-route"]
-
     ROOT["/"]
     API["/api"]
     INTERNAL["/internal"]
-
     FRONTEND["frontend:80"]
-
     STABLE["backend-stable:4000"]
-
     CANARY["backend-canary:4000"]
 
     ROUTE --> ROOT
@@ -364,10 +322,8 @@ graph TD
     ROUTE --> INTERNAL
 
     ROOT --> FRONTEND
-
     API --> STABLE
     API --> CANARY
-
     INTERNAL --> STABLE
     INTERNAL --> CANARY
 ```
@@ -380,13 +336,17 @@ The backend stable and canary Services are used by Argo Rollouts to implement pr
 
 The Gateway provides an HTTPS listener for:
 
-`*.microservices.home.arpa`
+```text
+*.microservices.home.arpa
+```
 
 TLS is terminated at Envoy Gateway.
 
 The application is accessed through:
 
-`https://app.microservices.home.arpa`
+```text
+https://app.microservices.home.arpa
+```
 
 The Gateway configuration also includes security-oriented HTTP behavior such as HSTS.
 
@@ -415,7 +375,9 @@ Argo CD provides GitOps reconciliation for the application platform.
 
 The Argo CD Application is:
 
-`microservices-platform`
+```text
+microservices-platform
+```
 
 The Git repository acts as the desired-state source.
 
@@ -423,19 +385,12 @@ The Application recursively manages the manifests under the `apps/` directory.
 
 ```mermaid
 graph TD
-
     GIT["Git Repository"]
-
     CHANGE["Application Change"]
-
     ARGOCD["Argo CD"]
-
     DESIRED["Desired Kubernetes State"]
-
     CLUSTER["Kubernetes Cluster"]
-
     ACTUAL["Actual Runtime State"]
-
     RECONCILE["Reconciliation"]
 
     GIT --> CHANGE
@@ -467,20 +422,14 @@ The HTTPRoute itself remains GitOps-managed.
 
 ```mermaid
 graph TD
-
     GIT["Git"]
-
     ARGOCD["Argo CD"]
-
     HTTPROUTE["HTTPRoute"]
-
     ROLLOUTS["Argo Rollouts"]
-
     WEIGHTS["Runtime Traffic Weights"]
 
     GIT --> ARGOCD
     ARGOCD --> HTTPROUTE
-
     ROLLOUTS --> WEIGHTS
     WEIGHTS --> HTTPROUTE
 ```
@@ -500,6 +449,224 @@ The Argo CD Application was validated as Synced and Healthy.
 
 ---
 
+# 🧪 Continuous Integration
+
+GitHub Actions provides the Continuous Integration layer for the GitOps repository.
+
+The CI pipeline validates Kubernetes manifests before changes are merged into the `main` branch.
+
+The pipeline is intentionally limited to validation and does not deploy workloads directly to the Kubernetes cluster.
+
+Deployment remains the responsibility of Argo CD.
+
+```mermaid
+graph LR
+    A[Developer] --> B[Feature Branch]
+    B --> C[Pull Request]
+    C --> D[GitHub Actions]
+    D --> E[YAML Validation]
+    D --> F[Kubernetes Validation]
+    D --> G[Git Diff Check]
+    E --> H{Checks Pass}
+    F --> H
+    G --> H
+    H --> I[Review and Merge]
+    I --> J[main]
+    J --> K[Argo CD]
+    K --> L[Kubernetes Cluster]
+```
+
+## CI Responsibilities
+
+The GitHub Actions workflow validates the GitOps repository through:
+
+- YAML syntax and style validation
+- Kubernetes manifest validation
+- Git diff validation
+- Pull Request validation
+- Push validation on `main`
+
+The CI workflow is stored at:
+
+```text
+.github/workflows/ci.yaml
+```
+
+The repository also contains:
+
+```text
+.yamllint.yml
+```
+
+which defines the YAML validation rules used by the pipeline.
+
+## Validation Pipeline
+
+```mermaid
+graph TD
+    A[Git Change] --> B{Trigger}
+    B -->|Pull Request| C[GitHub Actions]
+    B -->|Push to main| C
+    C --> D[Git Diff Check]
+    C --> E[YAML Lint]
+    C --> F[Kubernetes Manifest Validation]
+    D --> G{Validation Result}
+    E --> G
+    F --> G
+    G -->|Pass| H[Continue Git Workflow]
+    G -->|Fail| I[Reject Invalid Change]
+```
+
+### YAML Validation
+
+`yamllint` validates YAML files under:
+
+```text
+apps/
+infrastructure/
+argocd/
+```
+
+The current configuration allows manifest lines up to 120 characters.
+
+```yaml
+extends: relaxed
+
+rules:
+  line-length:
+    max: 120
+    level: error
+```
+
+### Kubernetes Manifest Validation
+
+`kubeconform` validates Kubernetes manifests against available Kubernetes schemas.
+
+The repository contains both standard Kubernetes resources and Custom Resources used by:
+
+- Argo CD
+- Argo Rollouts
+- Gateway API
+- Cilium
+- Envoy Gateway
+- Longhorn
+- RKE2
+
+Missing external CRD schemas are ignored during this validation so that resources whose schemas are provided by their platform components do not incorrectly fail the CI pipeline.
+
+### Pull Request Validation
+
+The Pull Request workflow was tested using:
+
+```text
+test/ci-pr-check
+```
+
+The branch opened a Pull Request targeting:
+
+```text
+main
+```
+
+GitHub Actions successfully executed:
+
+```text
+GitOps CI / Validate Kubernetes Manifests (pull_request)
+```
+
+![CI Pull Request Success](./screenshots/37-CI-Pull-Request-Success.png)
+
+The successful check confirms that Pull Request validation is working as expected.
+
+### Push Validation
+
+The workflow was also validated after pushing changes to `main`.
+
+The GitHub Actions workflow completed successfully:
+
+```text
+GitOps CI
+└── Validate Kubernetes Manifests
+    └── Success
+```
+
+![CI Push Success](./screenshots/36-CI-Push-Success.png)
+
+This confirms that the CI pipeline also validates changes pushed to the main branch.
+
+## CI and GitOps Separation
+
+CI and CD have intentionally different responsibilities.
+
+```mermaid
+graph LR
+    A[GitHub Actions] --> B[Validate Repository]
+    B --> C[Git]
+    C --> D[Argo CD]
+    D --> E[Reconcile Cluster]
+    E --> F[Kubernetes]
+```
+
+GitHub Actions verifies that repository changes are valid.
+
+Argo CD uses the Git repository as the desired state and reconciles the Kubernetes cluster.
+
+The CI workflow does not execute:
+
+```bash
+kubectl apply
+```
+
+and does not directly deploy workloads.
+
+This prevents multiple deployment mechanisms from modifying the cluster and preserves the pull-based GitOps model.
+
+## CI Design Decisions
+
+### Validation Before Deployment
+
+Manifest validation is performed before changes are merged into the approved `main` branch.
+
+This reduces the risk of introducing malformed YAML or invalid Kubernetes manifests into the GitOps source of truth.
+
+### Pull Request Checks
+
+Pull Requests provide an early validation point before changes become part of the main GitOps state.
+
+```mermaid
+graph LR
+    A[Feature Branch] --> B[Pull Request]
+    B --> C[GitHub Actions]
+    C --> D[Validation]
+    D --> E[Review]
+    E --> F[Merge]
+```
+
+### No Direct Deployment from CI
+
+GitHub Actions is intentionally not used as a deployment mechanism.
+
+Argo CD remains responsible for applying the desired state to the Kubernetes cluster.
+
+This keeps CI focused on quality gates while maintaining a clean GitOps deployment model.
+
+## CI Status
+
+The CI implementation has been successfully validated.
+
+- [x] GitHub Actions workflow
+- [x] YAML validation
+- [x] Kubernetes manifest validation
+- [x] Git diff validation
+- [x] Push validation
+- [x] Pull Request validation
+- [x] Successful CI execution
+- [x] CI and Argo CD responsibility separation
+
+The CI layer is now considered complete.
+
+---
+
 # 📦 Progressive Delivery
 
 Argo Rollouts manages progressive application releases.
@@ -511,20 +678,14 @@ Two different deployment strategies are intentionally implemented:
 
 ```mermaid
 graph TD
-
     ROLLOUTS["Argo Rollouts"]
-
     BACKEND["Backend"]
-
     CANARY["Canary<br/>10% / 25% / 50% / 100%"]
-
     FRONTEND["Frontend"]
-
     BLUEGREEN["Blue/Green<br/>Active / Preview"]
 
     ROLLOUTS --> BACKEND
     BACKEND --> CANARY
-
     ROLLOUTS --> FRONTEND
     FRONTEND --> BLUEGREEN
 ```
@@ -551,7 +712,6 @@ Traffic progression:
 
 ```mermaid
 graph TD
-
     A["100% Stable"]
     B["90% Stable<br/>10% Canary"]
     C["75% Stable<br/>25% Canary"]
@@ -570,25 +730,17 @@ Argo Rollouts modifies the Gateway API HTTPRoute weights during the progression.
 
 ```mermaid
 graph TD
-
     ROLLOUT["Backend Rollout"]
-
     STABLE["backend-stable"]
-
     CANARY["backend-canary"]
-
     HTTPROUTE["HTTPRoute"]
-
     ENVOY["Envoy Gateway"]
-
     CLIENT["Application Traffic"]
 
     ROLLOUT --> STABLE
     ROLLOUT --> CANARY
-
     STABLE --> HTTPROUTE
     CANARY --> HTTPROUTE
-
     HTTPROUTE --> ENVOY
     ENVOY --> CLIENT
 ```
@@ -620,17 +772,11 @@ The preview Service is used to expose and validate the new version before promot
 
 ```mermaid
 graph TD
-
     RELEASE["New Frontend Release"]
-
     PREVIEW["frontend-preview"]
-
     VALIDATE["Preview Validation"]
-
     PROMOTE["Manual Promotion"]
-
     ACTIVE["frontend"]
-
     PRODUCTION["Production Traffic"]
 
     RELEASE --> PREVIEW
@@ -642,13 +788,14 @@ graph TD
 
 The current successful release is:
 
-`a7medsayed/frontend:v1.0.1`
+```text
+a7medsayed/frontend:v1.0.1
+```
 
 Promotion is performed manually.
 
 ```mermaid
 graph LR
-
     OLD["v1.0.0<br/>Active"]
     NEW["v1.0.1<br/>Preview"]
 
@@ -659,7 +806,6 @@ After promotion:
 
 ```mermaid
 graph LR
-
     NEW["v1.0.1<br/>Active"]
     OLD["v1.0.0<br/>Scaled Down"]
 
@@ -676,18 +822,13 @@ This behavior was demonstrated using a failed Frontend Preview release.
 
 ```mermaid
 graph TD
-
     ACTIVE["Known-Good Production"]
-
     PREVIEW["New Preview Release"]
-
     FAILURE["ImagePullBackOff"]
-
     USERS["Users"]
 
     PREVIEW --> FAILURE
     ACTIVE --> USERS
-
     FAILURE -. Production Remains Active .-> ACTIVE
 ```
 
@@ -720,25 +861,20 @@ The storage architecture includes:
 
 The default StorageClass is:
 
-`longhorn`
+```text
+longhorn
+```
 
 The MySQL persistent volumes use 10Gi storage.
 
 ```mermaid
 graph TD
-
     APP["Stateful Application"]
-
     PVC["PersistentVolumeClaim"]
-
     SC["StorageClass<br/>longhorn"]
-
     PV["PersistentVolume"]
-
     LONGHORN["Longhorn"]
-
     REPLICAS["Replicated Storage"]
-
     WORKERS["Worker Nodes"]
 
     APP --> PVC
@@ -768,34 +904,22 @@ The database layer uses:
 
 ```mermaid
 graph TD
-
     APP["Backend Application"]
-
     ROUTER["HAProxy<br/>mysql-router"]
-
     PRIMARY["MySQL<br/>Current Primary"]
-
     REPLICA["MySQL<br/>Replica"]
-
     FC["MySQL Failover Controller"]
-
     PVC1["Primary PVC"]
-
     PVC2["Replica PVC"]
-
     LONGHORN["Longhorn"]
 
     APP --> ROUTER
-
     ROUTER --> PRIMARY
     ROUTER -. Failover Target .-> REPLICA
-
     PRIMARY --> PVC1
     REPLICA --> PVC2
-
     PVC1 --> LONGHORN
     PVC2 --> LONGHORN
-
     FC --> PRIMARY
     FC --> REPLICA
     FC --> ROUTER
@@ -819,23 +943,14 @@ When the primary becomes unavailable, the failover controller detects the failur
 
 ```mermaid
 graph TD
-
     PRIMARY["MySQL Primary"]
-
     HEALTH["Primary Health Checks"]
-
     FAILURE["Primary Failure"]
-
     DETECT["Failure Detection"]
-
     PROMOTE["Replica Promotion"]
-
     STATE["Update HA State"]
-
     ROUTER["Update HAProxy"]
-
     RESTART["Restart Router"]
-
     NEWPRIMARY["MySQL Replica<br/>New Primary"]
 
     PRIMARY --> HEALTH
@@ -850,11 +965,15 @@ graph TD
 
 The validated failover state is represented by:
 
-`current-primary = mysql-replica`
+```text
+current-primary = mysql-replica
+```
 
 and:
 
-`rejoin-required = true`
+```text
+rejoin-required = true
+```
 
 The failed primary Pod is recreated by Kubernetes.
 
@@ -868,17 +987,11 @@ The recovery model separates database leadership from Kubernetes Pod identity.
 
 ```mermaid
 graph TD
-
     FAILED["Original Primary Fails"]
-
     REPLICA["Replica"]
-
     PROMOTION["Replica Promoted"]
-
     OLDPRIMARY["Original Primary Pod Recreated"]
-
     REJOIN["Rejoin / Recovery"]
-
     FINAL["Healthy HA Topology"]
 
     FAILED --> REPLICA
@@ -901,11 +1014,8 @@ Redis and MySQL have different responsibilities.
 
 ```mermaid
 graph TD
-
     APPLICATION["Backend Application"]
-
     REDIS["Redis<br/>Cache"]
-
     MYSQL["MySQL<br/>Persistent Data"]
 
     APPLICATION --> REDIS
@@ -929,13 +1039,9 @@ The application layer consists of:
 
 ```mermaid
 graph TD
-
     FRONTEND["Frontend"]
-
     BACKEND["Backend"]
-
     REDIS["Redis"]
-
     MYSQL["MySQL HA"]
 
     FRONTEND --> BACKEND
@@ -949,49 +1055,44 @@ The application components are independently deployable and are managed through 
 
 # 🔄 End-to-End GitOps Delivery
 
-The complete delivery model combines Git, Argo CD, Argo Rollouts, Gateway API, and Kubernetes.
+The complete delivery model combines Git, GitHub Actions, Argo CD, Argo Rollouts, Gateway API, and Kubernetes.
 
 ```mermaid
 graph TD
-
     DEVELOPER["Developer"]
-
+    BRANCH["Feature Branch"]
     PR["Pull Request"]
-
+    CI["GitHub Actions"]
+    VALIDATION["Manifest Validation"]
     GIT["Git Repository"]
-
     ARGOCD["Argo CD"]
-
     MANIFESTS["Application Manifests"]
-
     ROLLOUTS["Argo Rollouts"]
-
     GATEWAY["Gateway API"]
-
     ENVOY["Envoy Gateway"]
-
     APPLICATION["Application"]
-
-    VALIDATE["Validation"]
-
+    VALIDATE["Application Validation"]
     PROMOTE["Promotion"]
 
-    DEVELOPER --> PR
-    PR --> GIT
+    DEVELOPER --> BRANCH
+    BRANCH --> PR
+    PR --> CI
+    CI --> VALIDATION
+    VALIDATION --> GIT
     GIT --> ARGOCD
     ARGOCD --> MANIFESTS
     MANIFESTS --> ROLLOUTS
-
     ROLLOUTS --> GATEWAY
     GATEWAY --> ENVOY
     ENVOY --> APPLICATION
-
     APPLICATION --> VALIDATE
     VALIDATE --> PROMOTE
 ```
 
 This model provides a clear separation between:
 
+- Code and configuration changes
+- CI validation
 - Desired state
 - Cluster reconciliation
 - Release progression
@@ -1017,17 +1118,11 @@ Validated failure behavior includes:
 
 ```mermaid
 graph TD
-
     FAILURE["Failure"]
-
     DETECT["Detection"]
-
     ISOLATE["Isolation"]
-
     RECOVER["Recovery"]
-
     VALIDATE["Validation"]
-
     SUCCESS["Healthy State"]
 
     FAILURE --> DETECT
@@ -1043,7 +1138,9 @@ graph TD
 
 The repository contains detailed screenshots inside:
 
-`screenshots/`
+```text
+screenshots/
+```
 
 Selected evidence includes:
 
@@ -1057,6 +1154,10 @@ Selected evidence includes:
 
 ![Production Unaffected](./screenshots/27-Production-Unaffected.png)
 
+![CI Push Success](./screenshots/36-CI-Push-Success.png)
+
+![CI Pull Request Success](./screenshots/37-CI-Pull-Request-Success.png)
+
 The screenshots are intentionally selected to demonstrate important implementation milestones without duplicating every command output.
 
 ---
@@ -1067,11 +1168,13 @@ Detailed documentation is organized by platform layer.
 
 ```text
 docs/
-├── 01-rke2/
+
+├── 01-rke2-ha/
 ├── 02-cilium/
-├── 03-gateway/
-├── 04-storage/
-└── 05-progressive-delivery/
+├── 03-gateway-api/
+├── 04-progressive-delivery/
+├── 05-storage/
+└── 06-ci/
 ```
 
 Each documentation section covers the implementation, configuration, validation, design decisions, and evidence for that platform layer.
@@ -1086,26 +1189,20 @@ Each platform component has a defined role.
 
 ```mermaid
 graph TD
-
     RKE2["RKE2<br/>Kubernetes Foundation"]
-
     CILIUM["Cilium<br/>Networking"]
-
     ENVOY["Envoy Gateway<br/>External Routing"]
-
+    CI["GitHub Actions<br/>CI Validation"]
     ARGOCD["Argo CD<br/>GitOps"]
-
     ROLLOUTS["Argo Rollouts<br/>Progressive Delivery"]
-
     LONGHORN["Longhorn<br/>Persistent Storage"]
-
     MYSQL["MySQL HA<br/>Persistent Data"]
-
     REDIS["Redis<br/>Caching"]
 
     RKE2 --> CILIUM
     CILIUM --> ENVOY
     ENVOY --> ARGOCD
+    CI --> ARGOCD
     ARGOCD --> ROLLOUTS
     ROLLOUTS --> MYSQL
     ROLLOUTS --> REDIS
@@ -1115,6 +1212,10 @@ graph TD
 ## Git as Source of Truth
 
 Application configuration is maintained in Git and reconciled by Argo CD.
+
+## Continuous Integration
+
+GitHub Actions validates proposed repository changes before they become part of the approved GitOps state.
 
 ## Progressive Delivery
 
@@ -1175,6 +1276,11 @@ GitOps remains responsible for desired configuration while runtime controllers m
 - [x] Pruning
 - [x] Self-healing
 - [x] Runtime HTTPRoute weight ownership
+- [x] GitHub Actions CI
+- [x] YAML validation
+- [x] Kubernetes manifest validation
+- [x] Pull Request checks
+- [x] Push validation
 
 ## Progressive Delivery
 
@@ -1212,6 +1318,7 @@ GitOps remains responsible for desired configuration while runtime controllers m
 - [ ] Expanded failure-domain validation
 - [ ] Extended observability
 - [ ] Additional security hardening
+- [ ] Branch protection and required CI checks
 
 ---
 
@@ -1232,6 +1339,10 @@ Gateway API provides a structured separation between platform Gateway configurat
 ## Envoy Gateway
 
 Envoy Gateway provides the Gateway API implementation, Envoy proxy infrastructure, TLS termination, and HTTP routing.
+
+## GitHub Actions
+
+GitHub Actions provides repository-level CI validation without becoming a second deployment mechanism.
 
 ## Argo CD
 
@@ -1261,28 +1372,21 @@ The platform is structured so additional production capabilities can be introduc
 
 ```mermaid
 graph TD
-
     FOUNDATION["Infrastructure<br/>RKE2"]
-
     NETWORK["Networking<br/>Cilium"]
-
     GATEWAY["Gateway<br/>Envoy Gateway"]
-
+    CI["CI<br/>GitHub Actions"]
     GITOPS["GitOps<br/>Argo CD"]
-
     DELIVERY["Progressive Delivery<br/>Argo Rollouts"]
-
     STORAGE["Storage<br/>Longhorn"]
-
     STATEFUL["Stateful Services<br/>MySQL + Redis"]
-
     OBS["Observability<br/>Prometheus / Metrics"]
-
     SECURITY["Security<br/>Hardening / Policies"]
 
     FOUNDATION --> NETWORK
     NETWORK --> GATEWAY
-    GATEWAY --> GITOPS
+    GATEWAY --> CI
+    CI --> GITOPS
     GITOPS --> DELIVERY
     DELIVERY --> STORAGE
     STORAGE --> STATEFUL
@@ -1296,37 +1400,22 @@ graph TD
 
 ```mermaid
 graph TD
-
     USERS["Users"]
-
     DNS["Application DNS"]
-
     VIP["Gateway VIP<br/>172.16.3.102"]
-
     CILIUM["Cilium"]
-
     ENVOY["Envoy Gateway"]
-
     HTTPROUTE["Gateway API<br/>HTTPRoute"]
-
     FRONTEND["Frontend<br/>Blue/Green"]
-
     BACKEND["Backend<br/>Canary"]
-
     REDIS["Redis"]
-
     HAPROXY["HAProxy"]
-
     MYSQL_PRIMARY["MySQL Primary"]
-
     MYSQL_REPLICA["MySQL Replica"]
-
     LONGHORN["Longhorn"]
-
+    CI["GitHub Actions"]
     ARGOCD["Argo CD"]
-
     ROLLOUTS["Argo Rollouts"]
-
     GIT["Git Repository"]
 
     USERS --> DNS
@@ -1334,22 +1423,19 @@ graph TD
     VIP --> CILIUM
     CILIUM --> ENVOY
     ENVOY --> HTTPROUTE
-
     HTTPROUTE --> FRONTEND
     HTTPROUTE --> BACKEND
-
     BACKEND --> REDIS
     BACKEND --> HAPROXY
-
     HAPROXY --> MYSQL_PRIMARY
     HAPROXY -. Failover .-> MYSQL_REPLICA
-
     MYSQL_PRIMARY --> LONGHORN
     MYSQL_REPLICA --> LONGHORN
 
+    GIT --> CI
+    CI --> ARGOCD
     GIT --> ARGOCD
     ARGOCD --> ROLLOUTS
-
     ROLLOUTS --> FRONTEND
     ROLLOUTS --> BACKEND
 ```
@@ -1363,6 +1449,7 @@ The resulting platform provides a private, production-oriented Kubernetes enviro
 - RKE2 provides the Kubernetes foundation and control-plane HA.
 - Cilium provides the cluster networking datapath.
 - Envoy Gateway provides the Gateway API-based application entry point.
+- GitHub Actions provides CI validation for GitOps changes.
 - Argo CD provides GitOps reconciliation.
 - Argo Rollouts provides progressive application delivery.
 - Longhorn provides persistent replicated storage.
@@ -1376,15 +1463,13 @@ The architecture is modular and provides a strong foundation for adding observab
 
 ---
 
-**---
-
-**# 📄 License**
+# 📄 License
 
 This project is licensed under the MIT License.
 
-**---
+---
 
-**# 👨‍💻 Author**
+# 👨‍💻 Author
 
 <div align="center">
 
