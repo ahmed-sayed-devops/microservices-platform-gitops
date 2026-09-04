@@ -2,40 +2,29 @@
 
 # 🚀 Private RKE2 Kubernetes Platform
 
-### Enterprise Private Kubernetes Platform with **RKE2 • Cilium • Gateway API • Envoy Gateway • Argo CD • Argo Rollouts • Longhorn • MySQL HA • Redis**
+### Enterprise Private Kubernetes Platform
+### RKE2 • Cilium • Gateway API • Envoy Gateway • Argo CD • Argo Rollouts • Longhorn • MySQL HA • Redis
 
-<p align="center">
+<br>
 
-![RKE2](https://img.shields.io/badge/RKE2-2563EB?style=for-the-badge&logo=kubernetes&logoColor=white)
+![RKE2](https://img.shields.io/badge/RKE2-2563EB?style=for-the-badge&logo=kubernetes&logoColor=white) ![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white) ![Cilium](https://img.shields.io/badge/Cilium-F8C517?style=for-the-badge&logo=cilium&logoColor=black) ![Gateway_API](https://img.shields.io/badge/Gateway_API-0F172A?style=for-the-badge&logo=kubernetes&logoColor=white)
 
-![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)
+![Envoy_Gateway](https://img.shields.io/badge/Envoy_Gateway-AC6199?style=for-the-badge&logo=envoyproxy&logoColor=white) ![Argo_CD](https://img.shields.io/badge/Argo_CD-EF7B4D?style=for-the-badge&logo=argo&logoColor=white) ![Argo_Rollouts](https://img.shields.io/badge/Argo_Rollouts-EF7B4D?style=for-the-badge&logo=argo&logoColor=white) ![Longhorn](https://img.shields.io/badge/Longhorn-0F172A?style=for-the-badge&logo=linux&logoColor=white)
 
-![Cilium](https://img.shields.io/badge/Cilium-F8C517?style=for-the-badge&logo=cilium&logoColor=black)
+![MySQL](https://img.shields.io/badge/MySQL_8.4-4479A1?style=for-the-badge&logo=mysql&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white) ![GitOps](https://img.shields.io/badge/GitOps-326CE5?style=for-the-badge&logo=git&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white) ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
 
-![Envoy Gateway](https://img.shields.io/badge/Envoy%20Gateway-FF6B35?style=for-the-badge&logo=envoyproxy&logoColor=white)
+<br>
 
-![Argo CD](https://img.shields.io/badge/Argo%20CD-EF7B4D?style=for-the-badge&logo=argo&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Production--Oriented-success?style=flat-square) ![Architecture](https://img.shields.io/badge/Architecture-HA-blue?style=flat-square) ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
-![Argo Rollouts](https://img.shields.io/badge/Argo%20Rollouts-EF7B4D?style=for-the-badge&logo=argo&logoColor=white)
-
-![Longhorn](https://img.shields.io/badge/Longhorn-0F172A?style=for-the-badge&logo=linux&logoColor=white)
-
-![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
-
-![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
-
-![GitOps](https://img.shields.io/badge/GitOps-2088FF?style=for-the-badge&logo=git&logoColor=white)
-
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
-
-</p>
+<br>
 
 Private production-oriented Kubernetes platform built from scratch using **RKE2**, with a highly available control plane, dedicated network architecture, **Cilium eBPF networking**, **Gateway API with Envoy Gateway**, GitOps through **Argo CD**, progressive delivery with **Argo Rollouts**, persistent storage through **Longhorn**, and a stateful data layer based on **MySQL HA and Redis**.
 
 </div>
 
-**---**
 ---
+
 
 # 🏗️ Architecture Domain
 
