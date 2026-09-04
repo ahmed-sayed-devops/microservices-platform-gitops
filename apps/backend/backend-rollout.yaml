@@ -96,18 +96,12 @@ spec:
         - analysis:
             templates:
               - templateName: backend-availability
-        - pause: {}
-
         - setWeight: 25
         - analysis:
             templates:
               - templateName: backend-availability
-        - pause: {}
-
         - setWeight: 50
         - analysis:
             templates:
               - templateName: backend-availability
-        - pause: {}
-
         - setWeight: 100
