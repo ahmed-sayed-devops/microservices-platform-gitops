@@ -1,0 +1,40 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: microservices-alerts
+  namespace: monitoring
+spec:
+  route:
+    receiver: telegram
+    groupBy:
+      - alertname
+      - service
+    groupWait: 10s
+    groupInterval: 5m
+    repeatInterval: 4h
+    matchers:
+      - name: alertname
+        value: BackendRolloutFailed
+        matchType: "="
+
+  receivers:
+    - name: telegram
+      telegramConfigs:
+        - sendResolved: true
+          botToken:
+            name: alertmanager-telegram
+            key: bot-token
+          chatID: 8899077998
+          parseMode: HTML
+          message: |
+            <b>🚨 Backend Rollout Failed</b>
+
+            <b>Alert:</b> {{ .CommonLabels.alertname }}
+            <b>Service:</b> {{ .CommonLabels.service }}
+            <b>Severity:</b> {{ .CommonLabels.severity }}
+
+            <b>Summary:</b>
+            {{ .CommonAnnotations.summary }}
+
+            <b>Description:</b>
+            {{ .CommonAnnotations.description }}

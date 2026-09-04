@@ -22,6 +22,7 @@ spec:
           labels:
             severity: critical
             service: backend
+            namespace: monitoring
           annotations:
             summary: "Backend rollout failed"
             description: "The backend Argo Rollout entered a failed state."
