@@ -9,6 +9,10 @@ spec:
       namespace: gateway-demo
       sectionName: http
 
+    - name: eg-gateway
+      namespace: gateway-demo
+      sectionName: https
+
   hostnames:
     - hubble.microservices.home.arpa
 
